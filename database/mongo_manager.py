@@ -1,5 +1,5 @@
 """
-MongoDB Manager - Gestor de conexiones a múltiples bases de datos MongoDB
+MongoDB Manager - Manager to handle connections to multiple MongoDB databases
 """
 
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -12,20 +12,10 @@ logger = logging.getLogger(__name__)
 
 class MongoManager:
     """
-    Gestor singleton de conexiones MongoDB
+    Manager to handle connections to multiple MongoDB databases
     
-    Maneja la conexión a MongoDB y proporciona acceso a múltiples
-    bases de datos desde una única conexión.
-    
-    Framework de acceso directo a las bases de datos y colecciones para mayor flexibilidad.
-    
-    Uso:
-        # Inicializar una vez (en el handler)
-        MongoManager.initialize('mongodb://localhost:27017')
-        
-        # Acceder a bases de datos
-        db = MongoManager.get_database('users_db')
-        users = await db.users.find().to_list(100)
+    Manages the connection to MongoDB and provides access to multiple
+    databases from a single connection.
     """
     
     _client: Optional[AsyncIOMotorClient] = None
@@ -35,13 +25,13 @@ class MongoManager:
     @classmethod
     def initialize(cls, connection_string: str = None):
         """
-        Inicializa la conexión a MongoDB
+        Initialize the connection to MongoDB
         
-        Solo se conecta una vez. Llamadas subsecuentes no hacen nada.
+        Only connects once. Subsequent calls do nothing.
         
         Args:
-            connection_string: URI de conexión de MongoDB.
-                              Si no se provee, usa la variable MONGODB_URI
+            connection_string: MongoDB connection URI.
+                              If not provided, uses the MONGODB_URI environment variable
         """
         if cls._client is not None:
             logger.debug("MongoManager already initialized")
@@ -63,18 +53,18 @@ class MongoManager:
     @classmethod
     def get_database(cls, db_name: str):
         """
-        Obtiene referencia a una base de datos
+        Get reference to a database
         
-        Las referencias se cachean para reutilización.
+        References are cached for reuse.
         
         Args:
-            db_name: Nombre de la base de datos
+            db_name: Name of the database
         
         Returns:
-            Objeto de base de datos de Motor
+            Reference to the database of Motor
         
         Raises:
-            RuntimeError: Si MongoManager no ha sido inicializado
+            RuntimeError: If MongoManager is not initialized
         """
         if cls._client is None:
             raise RuntimeError(
@@ -91,19 +81,19 @@ class MongoManager:
     @classmethod
     def get_client(cls) -> Optional[AsyncIOMotorClient]:
         """
-        Obtiene el cliente de MongoDB
+        Get the MongoDB client
         
         Returns:
-            Cliente de Motor o None si no está inicializado
+            Reference to the client of Motor or None if not initialized
         """
         return cls._client
     
     @classmethod
     async def close(cls):
         """
-        Cierra la conexión a MongoDB
+        Close the connection to MongoDB
         
-        Útil para testing o cleanup.
+        Useful for testing or cleanup.
         """
         if cls._client:
             logger.info("Closing MongoDB connection")
@@ -115,20 +105,20 @@ class MongoManager:
     @classmethod
     def is_initialized(cls) -> bool:
         """
-        Verifica si el manager está inicializado
+        Check if the manager is initialized
         
         Returns:
-            True si está inicializado, False en caso contrario
+            True if initialized, False otherwise
         """
         return cls._client is not None
     
     @classmethod
     async def ping(cls) -> bool:
         """
-        Verifica la conexión a MongoDB
+        Check the connection to MongoDB
         
         Returns:
-            True si la conexión está activa, False en caso contrario
+            True if the connection is active, False otherwise
         """
         if not cls._client:
             return False
@@ -137,6 +127,6 @@ class MongoManager:
             await cls._client.admin.command('ping')
             return True
         except Exception as e:
-            logger.error(f"MongoDB ping failed: {e}")
+            logger.error(f"MongoDB ping failed: {str(e)}")
             return False
 

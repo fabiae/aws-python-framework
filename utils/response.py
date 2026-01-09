@@ -1,5 +1,5 @@
 """
-Response Utilities - Helpers para construir respuestas
+Response Utilities - Helpers to build standardized responses
 """
 
 from typing import Dict, Any, Optional
@@ -7,24 +7,24 @@ from typing import Dict, Any, Optional
 
 class ApiResponse:
     """
-    Helper para construir respuestas estandarizadas
+    Helper to build standardized responses
     
-    Proporciona métodos estáticos para crear respuestas comunes
-    de forma rápida y consistente.
+    Provides static methods to create common responses
+    quickly and consistently.
     """
     
     @staticmethod
     def success(data: Any, status_code: int = 200, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """
-        Crea una respuesta de éxito
+        Create a success response
         
         Args:
-            data: Datos a retornar
-            status_code: Código HTTP (default 200)
-            headers: Headers adicionales
+            data: Data to return
+            status_code: HTTP status code (default 200)
+            headers: Additional headers
         
         Returns:
-            Dict con code, body y headers
+            Dict with code, body and headers
         """
         return {
             'code': status_code,
@@ -35,15 +35,15 @@ class ApiResponse:
     @staticmethod
     def error(message: str, status_code: int = 500, details: Optional[Dict] = None) -> Dict[str, Any]:
         """
-        Crea una respuesta de error
+        Create an error response
         
         Args:
-            message: Mensaje de error
-            status_code: Código HTTP (default 500)
-            details: Detalles adicionales del error
+            message: Error message
+            status_code: HTTP status code (default 500)
+            details: Additional error details
         
         Returns:
-            Dict con code, body y headers
+            Dict with code, body and headers
         """
         body = {
             'error': True,
@@ -62,80 +62,80 @@ class ApiResponse:
     @staticmethod
     def not_found(message: str = "Resource not found") -> Dict[str, Any]:
         """
-        Crea una respuesta 404
+        Create a 404 response
         
         Args:
-            message: Mensaje personalizado
+            message: Custom message
         
         Returns:
-            Dict con code 404
+            Dict with code 404
         """
         return ApiResponse.error(message, 404)
     
     @staticmethod
     def bad_request(message: str = "Bad request", details: Optional[Dict] = None) -> Dict[str, Any]:
         """
-        Crea una respuesta 400
+        Create a 400 response
         
         Args:
-            message: Mensaje de error
-            details: Detalles de validación
+            message: Error message
+            details: Validation details
         
         Returns:
-            Dict con code 400
+            Dict with code 400
         """
         return ApiResponse.error(message, 400, details)
     
     @staticmethod
     def unauthorized(message: str = "Unauthorized") -> Dict[str, Any]:
         """
-        Crea una respuesta 401
+        Create a 401 response
         
         Args:
-            message: Mensaje de error
+            message: Error message
         
         Returns:
-            Dict con code 401
+            Dict with code 401
         """
         return ApiResponse.error(message, 401)
     
     @staticmethod
     def forbidden(message: str = "Forbidden") -> Dict[str, Any]:
         """
-        Crea una respuesta 403
+        Create a 403 response
         
         Args:
-            message: Mensaje de error
+            message: Error message
         
         Returns:
-            Dict con code 403
+            Dict with code 403
         """
         return ApiResponse.error(message, 403)
     
     @staticmethod
     def created(data: Any, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """
-        Crea una respuesta 201 (Created)
-        
+        Create a 201 response (Created)
+
         Args:
-            data: Datos del recurso creado
-            headers: Headers adicionales (ej: Location)
+            data: Data of the created resource
+            headers: Additional headers (e.g: Location)
         
         Returns:
-            Dict con code 201
+            Dict with code 201
         """
         return ApiResponse.success(data, 201, headers)
     
     @staticmethod
     def no_content(headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """
-        Crea una respuesta 204 (No Content)
+        Create a 204 response (No Content)
         
         Args:
-            headers: Headers adicionales
+            headers: Additional headers
         
         Returns:
-            Dict con code 204
+            Dict with code 204
         """
         return {
             'code': 204,

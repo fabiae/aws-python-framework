@@ -1,5 +1,5 @@
 """
-Fetcher - Carga dinámica de controladores API basado en endpoint y método HTTP
+Fetcher - Dynamically load API controllers based on endpoint and HTTP method
 """
 
 import os
@@ -13,12 +13,12 @@ logger = logging.getLogger(__name__)
 
 class Fetcher:
     """
-    Carga dinámica de controladores API
+    Dynamically load API controllers
     
-    Fetcher del framework, determina qué archivo cargar basándose
-    en el endpoint y método HTTP usando convención sobre configuración.
+    Fetcher of the framework, determines which file to load based on
+    the endpoint and HTTP method using convention over configuration.
     
-    Ejemplos:
+    Examples:
         GET /users        -> api/users/list.py
         GET /users/123    -> api/users/get.py
         POST /users       -> api/users/post.py
@@ -31,11 +31,11 @@ class Fetcher:
     
     def __init__(self, endpoint: str, method: str):
         """
-        Inicializa el fetcher
+        Initializes the fetcher
         
         Args:
-            endpoint: El endpoint de la API (ej: 'users' o 'users/123/posts')
-            method: El método HTTP (get, post, put, delete, etc.)
+            endpoint: The endpoint of the API (e.g.: 'users' or 'users/123/posts')
+            method: The HTTP method (get, post, put, delete, etc.)
         """
         self.endpoint = endpoint.strip('/')
         self.method = method.lower()
@@ -43,32 +43,32 @@ class Fetcher:
     @property
     def file_path(self) -> str:
         """
-        Calcula la ruta del archivo basado en endpoint y método
+        Calculates the path of the file based on endpoint and method
         
-        Lógica:
-        - Split endpoint por '/'
-        - Si método es GET y hay cantidad impar de partes -> 'list'
-        - Si método es GET y hay cantidad par de partes -> 'get'
-        - Otros métodos usan su nombre directo
-        - Solo las partes en índices pares (0,2,4...) son directorios
+        Logic:
+        - Split endpoint by '/'
+        - If method is GET and there is an odd number of parts -> 'list'
+        - If method is GET and there is an even number of parts -> 'get'
+        - Other methods use their direct name
+        - Only the parts in even indices (0,2,4...) are directories
         
         Returns:
-            Ruta absoluta al archivo del controlador
+            Absolute path to the controller file
         """
         url_parts = self.endpoint.split('/') if self.endpoint else []
         
-        # Determinar el nombre del método
+        # Determine the name of the method
         if self.method == 'get' and len(url_parts) % 2 == 1:
             method_name = 'list'
         else:
             method_name = self.method
         
-        # Solo partes pares son directorios (0, 2, 4...)
-        # Las impares son IDs de recursos
+        # Only even parts are directories (0, 2, 4...)
+        # Odd parts are resource IDs
         dir_parts = [url_parts[i] for i in range(0, len(url_parts), 2)]
         file_dir = '/'.join(dir_parts) if dir_parts else ''
         
-        # Construir ruta completa
+        # Build the complete path
         base_path = Path(os.getcwd()) / self.API_FOLDER
         file_path = base_path / file_dir / f"{method_name}.py"
         
@@ -79,50 +79,50 @@ class Fetcher:
     @property
     def path_parameters(self) -> List[str]:
         """
-        Extrae path parameters del endpoint
+        Extracts path parameters from the endpoint
         
-        Los path parameters son las partes en índices impares (1,3,5...)
+        The path parameters are the parts in odd indices (1,3,5...)
         
-        Ejemplos:
+        Examples:
             'users/123' -> ['123']
             'users/123/posts/456' -> ['123', '456']
             'users' -> []
         
         Returns:
-            Lista de path parameters
+            List of path parameters
         """
         url_parts = self.endpoint.split('/') if self.endpoint else []
         return [url_parts[i] for i in range(1, len(url_parts), 2)]
     
     def get_controller(self):
         """
-        Carga y retorna una instancia del controlador
+        Loads and returns an instance of the controller
         
-        Usa caché para evitar cargar el mismo módulo múltiples veces.
-        Busca una clase que herede de API en el módulo.
+        Uses cache to avoid loading the same module multiple times.
+        Searches for a class that inherits from API in the module.
         
         Returns:
-            Instancia del controlador API
+            Instance of the API controller
         
         Raises:
-            FileNotFoundError: Si no existe el archivo
-            ValueError: Si no encuentra una clase API válida en el archivo
+            FileNotFoundError: If the file does not exist
+            ValueError: If the API class is not valid in the file
         """
         file_path = self.file_path
         
-        # Verificar caché
+        # Verify cache
         if file_path in self._cache:
             logger.debug(f"Using cached controller: {file_path}")
             return self._cache[file_path]()
         
-        # Verificar que el archivo existe
+        # Verify that the file exists
         if not os.path.exists(file_path):
             raise FileNotFoundError(
                 f"API Controller not found: {file_path}\n"
                 f"Expected file for endpoint '{self.endpoint}' with method '{self.method}'"
             )
         
-        # Cargar módulo dinámicamente
+        # Load module dynamically
         spec = importlib.util.spec_from_file_location("api_module", file_path)
         if not spec or not spec.loader:
             raise ImportError(f"Could not load module spec from: {file_path}")
@@ -130,7 +130,7 @@ class Fetcher:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         
-        # Buscar clase que herede de API
+        # Search for a class that inherits from API
         controller_class = None
         for item_name in dir(module):
             item = getattr(module, item_name)
@@ -146,10 +146,10 @@ class Fetcher:
                 f"Make sure your file exports a class that inherits from API"
             )
         
-        # Cachear la clase (no la instancia)
+        # Cache the class (not the instance)
         self._cache[file_path] = controller_class
         logger.info(f"Loaded controller: {controller_class.__name__} from {file_path}")
         
-        # Retornar nueva instancia
+        # Return new instance
         return controller_class()
 

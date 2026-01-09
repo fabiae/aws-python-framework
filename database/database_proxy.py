@@ -1,5 +1,5 @@
 """
-Database Proxy - Proxy para acceso dinámico a múltiples bases de datos
+Database Proxy - Proxy to dynamically access multiple databases
 """
 
 import logging
@@ -10,54 +10,35 @@ logger = logging.getLogger(__name__)
 
 class DatabaseProxy:
     """
-    Proxy para acceso dinámico a bases de datos y colecciones MongoDB
+    Proxy to dynamically access multiple databases and collections in MongoDB
     
-    Este proxy permite acceder a múltiples bases de datos y colecciones
-    de forma dinámica y pythónica, sin necesidad de definir models.
-    
-    Framework de acceso directo a las bases de datos y colecciones para mayor flexibilidad.
-    
-    Uso:
-        # Acceder a diferentes bases de datos
-        users = await self.db.users_db.users.find().to_list(100)
-        
-        # Otra base de datos
-        logs = await self.db.analytics_db.logs.insert_one({...})
-        
-        # Múltiples colecciones en la misma DB
-        titles = await self.db.constitution_db.titles.find_one({...})
-        articles = await self.db.constitution_db.articles.find({...})
-    
-    Ventajas:
-        - Acceso a múltiples bases de datos sin configuración
-        - No necesitas definir Models
-        - Syntax pythónico y claro
-        - Toda la potencia de Motor/PyMongo
+    This proxy allows accessing multiple databases and collections
+    dynamically and pythonically, without the need to define models.
     """
     
     def __init__(self, mongo_manager):
         """
-        Inicializa el proxy
+        Initialize the proxy
         
         Args:
-            mongo_manager: Clase MongoManager (no instancia)
+            mongo_manager: MongoManager class (not an instance)
         """
         self._manager = mongo_manager
         self._db_cache = {}
     
     def __getattr__(self, db_name: str) -> Any:
         """
-        Acceso dinámico a bases de datos
+        Dynamic access to databases
         
-        Se llama cuando accedes a self.db.nombre_base_datos
+        It is called when you access self.db.database_name
         
         Args:
-            db_name: Nombre de la base de datos
+            db_name: Name of the database
         
         Returns:
-            Referencia a la base de datos de Motor
+            Reference to the database of Motor
         """
-        # Evitar recursión con atributos internos
+        # Avoid recursion with internal attributes
         if db_name.startswith('_'):
             raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{db_name}'")
         
@@ -68,7 +49,7 @@ class DatabaseProxy:
         return self._db_cache[db_name]
     
     def __repr__(self) -> str:
-        """Representación string del proxy"""
+        """String representation of the proxy"""
         cached_dbs = list(self._db_cache.keys())
         return f"<DatabaseProxy cached_dbs={cached_dbs}>"
 

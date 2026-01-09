@@ -1,5 +1,5 @@
 """
-API Module - Componentes para manejar APIs REST
+API Module - Components to handle REST APIs
 """
 
 from .base import API

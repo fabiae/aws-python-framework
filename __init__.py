@@ -1,5 +1,5 @@
 """
-Lambda Framework - Mini framework para Python AWS Lambda
+AWS Python Framework
 """
 
 __version__ = "0.1.0"

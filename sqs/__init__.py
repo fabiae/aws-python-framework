@@ -1,5 +1,5 @@
 """
-SQS Module - Componentes para manejar consumers de SQS
+SQS Module - Components to handle SQS consumers
 """
 
 from .consumer_base import SQSConsumer

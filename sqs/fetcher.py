@@ -1,5 +1,5 @@
 """
-SQS Fetcher - Carga dinámica de consumers basado en nombre
+SQS Fetcher - Dynamically load consumers based on name
 """
 
 import os
@@ -12,13 +12,10 @@ logger = logging.getLogger(__name__)
 
 class SQSFetcher:
     """
-    Carga dinámica de consumers de SQS
+    Dynamically load SQS consumers
     
-    Similar al Fetcher de API pero para consumers de SQS.
-    Busca consumers en la carpeta 'consumers/' por nombre.
-    
-    Ejemplo:
-        'user-created' -> consumers/user_created.py -> UserCreatedConsumer
+    Similar to the API Fetcher but for SQS consumers.
+    Searches for consumers in the 'consumers/' folder by name.
     """
     
     CONSUMERS_FOLDER = "consumers"
@@ -26,24 +23,24 @@ class SQSFetcher:
     
     def __init__(self, consumer_name: str):
         """
-        Inicializa el fetcher
+        Initialize the fetcher
         
         Args:
-            consumer_name: Nombre del consumer (ej: 'user-created')
+            consumer_name: Name of the consumer (e.g.: 'user-created')
         """
         self.consumer_name = consumer_name
     
     @property
     def file_path(self) -> str:
         """
-        Calcula la ruta del archivo del consumer
+        Calculate the path of the consumer file
         
-        Convierte 'user-created' a 'user_created.py'
+        Converts 'user-created' to 'user_created.py'
         
         Returns:
-            Ruta absoluta al archivo del consumer
+            Absolute path to the consumer file
         """
-        # Convertir guiones a guiones bajos para nombre de archivo Python
+        # Convert dashes to underscores for Python file name
         file_name = self.consumer_name.replace('-', '_') + '.py'
         
         base_path = Path(os.getcwd()) / self.CONSUMERS_FOLDER
@@ -55,30 +52,30 @@ class SQSFetcher:
     
     def get_consumer(self):
         """
-        Carga y retorna una instancia del consumer
+        Load and return an instance of the consumer
         
         Returns:
-            Instancia del consumer
+            Instance of the consumer
         
         Raises:
-            FileNotFoundError: Si no existe el archivo
-            ValueError: Si no encuentra una clase consumer válida
+            FileNotFoundError: If the file does not exist
+            ValueError: If the consumer class is not valid
         """
         file_path = self.file_path
         
-        # Verificar caché
+        # Verify cache
         if file_path in self._cache:
             logger.debug(f"Using cached consumer: {file_path}")
             return self._cache[file_path]()
         
-        # Verificar que el archivo existe
+        # Verify that the file exists
         if not os.path.exists(file_path):
             raise FileNotFoundError(
                 f"Consumer not found: {file_path}\n"
                 f"Expected file for consumer '{self.consumer_name}'"
             )
         
-        # Cargar módulo dinámicamente
+        # Load module dynamically
         spec = importlib.util.spec_from_file_location("consumer_module", file_path)
         if not spec or not spec.loader:
             raise ImportError(f"Could not load module spec from: {file_path}")
@@ -86,7 +83,7 @@ class SQSFetcher:
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         
-        # Buscar clase que herede de SQSConsumer
+        # Search for class that inherits from SQSConsumer
         consumer_class = None
         for item_name in dir(module):
             item = getattr(module, item_name)
@@ -102,10 +99,10 @@ class SQSFetcher:
                 f"Make sure your file exports a class that inherits from SQSConsumer"
             )
         
-        # Cachear la clase
+        # Cache the class
         self._cache[file_path] = consumer_class
         logger.info(f"Loaded consumer: {consumer_class.__name__} from {file_path}")
         
-        # Retornar nueva instancia
+        # Return new instance
         return consumer_class()
 

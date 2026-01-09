@@ -1,5 +1,5 @@
 """
-API Base Class - Clase base para todas las APIs REST
+API Base Class - Base class for all REST APIs
 """
 
 from abc import ABC, abstractmethod
@@ -8,16 +8,10 @@ from typing import Dict, Any, Optional, List
 
 class API(ABC):
     """
-    Clase base para todas las APIs
+    Base class for all REST APIs
     
-    Clase base que proporciona la estructura básica
-    para manejar requests y responses de API Gateway.
-    
-    Ejemplo de uso:
-        class UserListAPI(API):
-            async def process(self):
-                users = await self.db.users_db.users.find().to_list(100)
-                self.set_body(users)
+    Base class that provides the basic structure
+    to handle requests and responses from API Gateway.
     """
     
     def __init__(self):
@@ -37,11 +31,9 @@ class API(ABC):
         # Database proxy
         self._db = None
     
-    # ==================== Request Getters/Setters ====================
-    
     @property
     def endpoint(self) -> str:
-        """El endpoint de la request (ej: 'users' o 'users/123')"""
+        """Endpoint of the request"""
         return self._endpoint
     
     @endpoint.setter
@@ -50,7 +42,7 @@ class API(ABC):
     
     @property
     def http_method(self) -> str:
-        """El método HTTP (get, post, put, delete, etc.)"""
+        """HTTP method (get, post, put, delete, etc.)"""
         return self._http_method
     
     @http_method.setter
@@ -59,7 +51,7 @@ class API(ABC):
     
     @property
     def data(self) -> Dict[str, Any]:
-        """Los datos de la request (body para POST/PUT, query params para GET)"""
+        """Data of the request (body for POST/PUT, query params for GET)"""
         return self._data
     
     @data.setter
@@ -68,7 +60,7 @@ class API(ABC):
     
     @property
     def headers(self) -> Dict[str, str]:
-        """Headers de la request"""
+        """Headers of the request"""
         return self._headers
     
     @headers.setter
@@ -77,7 +69,7 @@ class API(ABC):
     
     @property
     def path_parameters(self) -> List[str]:
-        """Path parameters extraídos del URL (ej: ['123'] para /users/123)"""
+        """Path parameters extracted from the URL"""
         return self._path_parameters
     
     @path_parameters.setter
@@ -86,82 +78,73 @@ class API(ABC):
     
     @property
     def query_parameters(self) -> Dict[str, Any]:
-        """Query parameters de la URL"""
+        """Query parameters of the URL"""
         return self._query_parameters
     
     @query_parameters.setter
     def query_parameters(self, value: Dict[str, Any]):
         self._query_parameters = value or {}
     
-    # ==================== Database Access ====================
-    
     @property
     def db(self):
         """
-        Acceso a bases de datos MongoDB
-        
-        Uso:
-            # Acceder a diferentes bases de datos y colecciones
-            result = await self.db.users_db.users.find_one({'_id': user_id})
-            await self.db.analytics_db.logs.insert_one({'action': 'user_login'})
+        Access to MongoDB databases
         """
         if self._db is None:
-            from lambda_framework.database.mongo_manager import MongoManager
-            from lambda_framework.database.database_proxy import DatabaseProxy
+            from database.mongo_manager import MongoManager
+            from database.database_proxy import DatabaseProxy
             self._db = DatabaseProxy(MongoManager)
         return self._db
     
-    # ==================== Response Builders ====================
-    
     def set_code(self, code: int):
         """
-        Establece el código de respuesta HTTP
+        Set the HTTP response code
         
         Args:
-            code: Código HTTP (200, 404, 500, etc.)
+            code: HTTP code (200, 404, 500, etc.)
         
         Returns:
-            self para encadenar llamadas
+            self to chain calls
         """
         self._response_code = code
         return self
     
     def set_body(self, body: Any):
         """
-        Establece el body de la respuesta
+        Set the body of the response
         
         Args:
-            body: Cualquier objeto serializable a JSON
+            body: Any serializable object to JSON
         
         Returns:
-            self para encadenar llamadas
+            self to chain calls
         """
         self._response_body = body
         return self
     
     def set_header(self, key: str, value: str):
         """
-        Agrega un header a la respuesta
+        Add a header to the response
         
         Args:
-            key: Nombre del header
-            value: Valor del header
+            key: Name of the header
+            value: Value of the header
         
         Returns:
-            self para encadenar llamadas
+            self to chain calls
         """
         self._response_headers[key] = value
         return self
     
     def set_headers(self, headers: Dict[str, str]):
         """
-        Establece múltiples headers
+        Set multiple headers
         
         Args:
-            headers: Diccionario de headers
+            headers: Dictionary of headers
         
         Returns:
-            self para encadenar llamadas
+            self to chain calls
         """
         self._response_headers.update(headers)
         return self
@@ -169,10 +152,10 @@ class API(ABC):
     @property
     def response(self) -> Dict[str, Any]:
         """
-        Retorna el objeto de respuesta completo
+        Return the complete response object
         
         Returns:
-            Dict con code, body y headers
+            Dict with code, body and headers
         """
         return {
             'code': self._response_code,
@@ -180,34 +163,22 @@ class API(ABC):
             'headers': self._response_headers
         }
     
-    # ==================== Lifecycle Hooks ====================
-    
     async def validate(self):
         """
-        Hook para validación de datos
+        Hook for data validation
         
-        Override este método para implementar validaciones personalizadas.
-        Si la validación falla, lanza una excepción.
-        
-        Ejemplo:
-            async def validate(self):
-                if 'email' not in self.data:
-                    raise ValueError("Email is required")
+        Override this method to implement custom validations.
+        If the validation fails, raise an exception.
         """
         pass
     
     @abstractmethod
     async def process(self):
         """
-        Método principal que debe implementar cada clase
+        Main method that must be implemented by each class
         
-        Este es el método donde implementas la lógica de tu API.
-        Debes usar set_body() y opcionalmente set_code() y set_header().
-        
-        Ejemplo:
-            async def process(self):
-                users = await self.db.users_db.users.find().to_list(100)
-                self.set_body(users)
+        This is the method where you implement the logic of your API.
+        You must use set_body() and optionally set_code() and set_header().
         """
-        raise NotImplementedError("Debes implementar el método process()")
+        raise NotImplementedError("You must implement the process() method")
 

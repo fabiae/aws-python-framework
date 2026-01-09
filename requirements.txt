@@ -1,0 +1,4 @@
+# Lambda Framework Dependencies
+motor==3.3.2              # MongoDB async driver
+pymongo==4.6.1            # MongoDB sync driver (used by motor)
+

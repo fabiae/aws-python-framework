@@ -1,5 +1,5 @@
 """
-Utils Module - Utilidades y helpers
+Utils Module - Utilities and helpers
 """
 
 from .response import ApiResponse

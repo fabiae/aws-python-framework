@@ -1,5 +1,5 @@
 """
-Database Module - Componentes para manejar conexiones a MongoDB
+Database Module - Components to handle connections to MongoDB
 """
 
 from .mongo_manager import MongoManager

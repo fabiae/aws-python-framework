@@ -1,5 +1,5 @@
 """
-Lambda Handler - Handler genérico reutilizable para todas las APIs
+Lambda Handler - Generic reusable handler for all APIs
 """
 
 import json
@@ -9,7 +9,7 @@ from typing import Dict, Any
 
 from .dispatcher import Dispatcher
 
-# Configurar logging
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -19,38 +19,35 @@ logger = logging.getLogger(__name__)
 
 def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
-    Handler genérico para AWS Lambda API Gateway
+    Generic handler for AWS Lambda API Gateway
     
-    Este handler es reutilizable para TODAS las rutas de tu API.
-    El routing dinámico se maneja mediante el Dispatcher y Fetcher.
-    
-    Uso en Terraform/Serverless:
-        handler: handlers.api_handler.handler
+    This handler is reusable for ALL routes of your API.
+    The dynamic routing is handled by the Dispatcher and Fetcher.
     
     Args:
-        event: Evento de API Gateway con path, httpMethod, body, etc.
-        context: Contexto de Lambda (request_id, etc.)
+        event: API Gateway event with path, httpMethod, body, etc.
+        context: Lambda context (request_id, etc.)
     
     Returns:
-        Response de API Gateway con statusCode, body y headers
+        Response of API Gateway with statusCode, body and headers
     """
     
-    # Log del request
+    # Log the request
     request_id = context.request_id if context else 'local'
     logger.info(f"Request ID: {request_id}")
     logger.debug(f"Event: {json.dumps(event)}")
     
     try:
-        # Crear dispatcher y ejecutar
+        # Create dispatcher and execute
         dispatcher = Dispatcher(event)
         response = asyncio.run(dispatcher.dispatch())
         
-        # Formatear respuesta para API Gateway
+        # Format response for API Gateway
         api_gateway_response = {
             'statusCode': response['code'],
             'headers': {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',  # Ajustar según necesites
+                'Access-Control-Allow-Origin': '*',  # Adjust as needed
                 'Access-Control-Allow-Headers': 'Content-Type,Authorization',
                 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
                 **response.get('headers', {})
@@ -64,7 +61,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     except Exception as e:
         logger.exception(f"Unhandled exception in handler: {e}")
         
-        # Respuesta de error genérica
+        # Generic error response
         return {
             'statusCode': 500,
             'headers': {

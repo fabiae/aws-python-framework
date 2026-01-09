@@ -1,5 +1,5 @@
 """
-Dispatcher - Orquesta el flujo de ejecución de las APIs
+Dispatcher - Orchestrates the execution flow of APIs
 """
 
 from typing import Dict, Any
@@ -14,30 +14,30 @@ logger = logging.getLogger(__name__)
 
 class Dispatcher:
     """
-    Orquesta la ejecución del API
+    Orchestrates the execution of the API
     
-    Dispatcher que maneja el ciclo de vida completo:
-    1. Prepara el controlador (carga dinámicamente)
-    2. Inyecta propiedades del request
-    3. Ejecuta validate()
-    4. Ejecuta process()
-    5. Retorna la respuesta
+    Dispatcher that handles the complete lifecycle:
+    1. Prepares the controller (dynamically loads)
+    2. Injects request properties
+    3. Executes validate()
+    4. Executes process()
+    5. Returns the response
     """
     
     def __init__(self, event: Dict[str, Any]):
         """
-        Inicializa el dispatcher con un evento de API Gateway
+        Initializes the dispatcher with an API Gateway event
         
         Args:
-            event: Evento de AWS API Gateway
+            event: AWS API Gateway event
         """
-        # Extraer información del evento
+        # Extract information from the event
         self.endpoint = event.get('path', '').strip('/')
         self.method = event.get('httpMethod', 'GET').lower()
         self.headers = event.get('headers') or {}
         self.query_params = event.get('queryStringParameters') or {}
         
-        # Extraer body
+        # Extract body
         raw_body = event.get('body', '{}')
         if isinstance(raw_body, str):
             try:
@@ -47,8 +47,8 @@ class Dispatcher:
         else:
             self.body = raw_body
         
-        # Para GET, los datos vienen en query params
-        # Para POST/PUT/PATCH, vienen en body
+        # For GET, data comes in query params
+        # For POST/PUT/PATCH, data comes in body
         if self.method == 'get':
             self.data = self.query_params
         else:
@@ -58,24 +58,24 @@ class Dispatcher:
     
     async def dispatch(self) -> Dict[str, Any]:
         """
-        Ejecuta el ciclo de vida completo del API
+        Executes the complete lifecycle of the API
         
         Returns:
-            Dict con code, body y headers de la respuesta
+            Dict with code, body and headers of the response
         """
         try:
-            # 1. Preparar - Cargar controlador e inyectar propiedades
+            # 1. Prepare - Load controller and inject properties
             api = self._prepare()
             
-            # 2. Validar
+            # 2. Validate
             logger.debug("Executing validate()")
             await api.validate()
             
-            # 3. Procesar
+            # 3. Process
             logger.debug("Executing process()")
             await api.process()
             
-            # 4. Si no se estableció código, usar 200 por defecto
+            # 4. If no code was set, use 200 by default
             if api.response['code'] is None:
                 api.set_code(200)
             
@@ -83,7 +83,7 @@ class Dispatcher:
             return api.response
             
         except FileNotFoundError as e:
-            # API no encontrada
+            # API not found
             logger.error(f"API not found: {e}")
             return {
                 'code': 404,
@@ -95,7 +95,7 @@ class Dispatcher:
             }
         
         except ValueError as e:
-            # Error de validación
+            # Validation error
             logger.error(f"Validation error: {e}")
             return {
                 'code': 400,
@@ -107,7 +107,7 @@ class Dispatcher:
             }
         
         except Exception as e:
-            # Error interno
+            # Internal error
             logger.exception(f"Internal error: {e}")
             return {
                 'code': 500,
@@ -120,22 +120,22 @@ class Dispatcher:
     
     def _prepare(self) -> API:
         """
-        Carga el controlador e inyecta propiedades
+        Load the controller and inject properties
         
         Returns:
-            Instancia del controlador con propiedades inyectadas
+            Instance of the controller with properties injected
         
         Raises:
-            FileNotFoundError: Si no encuentra el controlador
-            ValueError: Si el controlador no es válido
+            FileNotFoundError: If the controller is not found
+            ValueError: If the controller is not valid
         """
         logger.debug(f"Preparing controller for {self.endpoint}")
         
-        # Crear fetcher y obtener controlador
+        # Create fetcher and get controller
         fetcher = Fetcher(self.endpoint, self.method)
         api = fetcher.get_controller()
         
-        # Inyectar propiedades del request
+        # Inject request properties
         api.endpoint = self.endpoint
         api.http_method = self.method
         api.data = self.data

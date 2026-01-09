@@ -1,5 +1,5 @@
 """
-SQS Consumer Base - Clase base para todos los consumers de SQS
+SQS Consumer Base - Base class for all SQS consumers
 """
 
 from abc import ABC, abstractmethod
@@ -10,59 +10,52 @@ import json
 
 class SQSConsumer(ABC):
     """
-    Clase base para consumers de SQS
+    Base class for all SQS consumers
     
-    Similar al IterativeSQSConsumer de Janis, proporciona estructura
-    para procesar mensajes de SQS de forma batch o individual.
-    
-    Ejemplo de uso:
-        class UserCreatedConsumer(SQSConsumer):
-            async def process_record(self, record):
-                user_id = record['body']['userId']
-                await self.send_welcome_email(user_id)
+    Provides structure to process SQS messages in batch or individually.
     """
     
     def __init__(self):
-        """Inicializa el consumer con un logger"""
+        """Initialize the consumer with a logger"""
         self.logger = logging.getLogger(self.__class__.__name__)
         self._db = None
     
     @property
     def db(self):
         """
-        Acceso a bases de datos MongoDB
+        Access to MongoDB databases
         
-        Uso:
+        Usage:
             result = await self.db.users_db.users.find_one({'_id': user_id})
         """
         if self._db is None:
-            from lambda_framework.database.mongo_manager import MongoManager
-            from lambda_framework.database.database_proxy import DatabaseProxy
+            from database.mongo_manager import MongoManager
+            from database.database_proxy import DatabaseProxy
             self._db = DatabaseProxy(MongoManager)
         return self._db
     
     @abstractmethod
     async def process_record(self, record: Dict[str, Any]):
         """
-        Procesa un registro individual de SQS
+        Process an individual SQS record
         
         Args:
-            record: Registro de SQS con 'body', 'messageId', etc.
+            record: SQS record with 'body', 'messageId', etc.
         
         Raises:
-            Exception: Cualquier error en el procesamiento
+            Exception: Any error in the processing
         """
-        raise NotImplementedError("Debes implementar process_record()")
+        raise NotImplementedError("You must implement process_record()")
     
     def parse_body(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Parsea el body del mensaje SQS
+        Parse the body of the SQS message
         
         Args:
-            record: Registro de SQS
+            record: SQS record
         
         Returns:
-            Body parseado como dict
+            Parsed body as dict
         """
         body = record.get('body', '{}')
         
@@ -77,13 +70,13 @@ class SQSConsumer(ABC):
     
     async def process_batch(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Procesa un batch de registros de SQS
+        Process a batch of SQS records
         
         Args:
-            records: Lista de registros de SQS
+            records: List of SQS records
         
         Returns:
-            Lista de resultados con éxito/error de cada registro
+            List of results with success/error for each record
         """
         results = []
         
@@ -110,7 +103,7 @@ class SQSConsumer(ABC):
                     'error': str(e)
                 })
         
-        # Log resumen
+        # Log summary
         success_count = sum(1 for r in results if r['success'])
         self.logger.info(
             f"Batch processing complete: {success_count}/{len(records)} successful"

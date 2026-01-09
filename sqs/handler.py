@@ -1,5 +1,5 @@
 """
-SQS Handler - Handler genérico reutilizable para consumers de SQS
+SQS Handler - Generic reusable handler for SQS consumers
 """
 
 import asyncio
@@ -8,7 +8,7 @@ from typing import Dict, Any, Callable
 
 from .fetcher import SQSFetcher
 
-# Configurar logging
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
@@ -18,54 +18,48 @@ logger = logging.getLogger(__name__)
 
 def sqs_handler(consumer_name: str) -> Callable:
     """
-    Factory que retorna un handler para un consumer específico
+    Factory that returns a handler for a specific consumer
     
-    Este patrón permite crear handlers específicos para cada consumer
-    mientras mantiene el código DRY.
-    
-    Uso:
-        # En tu archivo handler
-        from lambda_framework.sqs.handler import sqs_handler
-        
-        handler = sqs_handler('user-created')
+    This pattern allows creating specific handlers for each consumer
+    while keeping the code DRY.
     
     Args:
-        consumer_name: Nombre del consumer (debe existir en consumers/)
+        consumer_name: Name of the consumer (must exist in consumers/)
     
     Returns:
-        Función handler configurada para ese consumer
+        Configured handler function for that consumer
     """
     
     def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         """
-        Handler genérico para AWS Lambda SQS
+        Generic handler for AWS Lambda SQS
         
         Args:
-            event: Evento de SQS con Records
-            context: Contexto de Lambda
+            event: SQS event with Records
+            context: Lambda context
         
         Returns:
-            Resumen del procesamiento
+            Summary of the processing
         """
         
-        # Log del request
+        # Log the request
         request_id = context.request_id if context else 'local'
         logger.info(f"SQS Handler - Request ID: {request_id}")
         logger.info(f"Consumer: {consumer_name}")
         
         try:
-            # Cargar consumer
+            # Load consumer
             fetcher = SQSFetcher(consumer_name)
             consumer = fetcher.get_consumer()
             
-            # Obtener registros
+            # Get records
             records = event.get('Records', [])
             logger.info(f"Processing {len(records)} records")
             
-            # Procesar batch
+            # Process batch
             results = asyncio.run(consumer.process_batch(records))
             
-            # Contar éxitos y fallos
+            # Count successes and failures
             success_count = sum(1 for r in results if r['success'])
             error_count = len(results) - success_count
             
@@ -94,13 +88,13 @@ def sqs_handler(consumer_name: str) -> Callable:
 
 def create_sqs_handler(consumer_name: str) -> Callable:
     """
-    Alias de sqs_handler para mayor claridad
+    Alias of sqs_handler for clarity
     
     Args:
-        consumer_name: Nombre del consumer
+        consumer_name: Name of the consumer
     
     Returns:
-        Función handler configurada
+        Configured handler function
     """
     return sqs_handler(consumer_name)
 
