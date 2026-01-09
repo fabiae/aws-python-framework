@@ -1,6 +1,6 @@
 # AWS Python Framework
 
-Mini-framework to create REST APIs and SQS Consumers with Python in AWS Lambda.
+Mini-framework to create REST APIs, SQS Consumers, SNS Publishers, and Fargate Tasks with Python in AWS Lambda.
 
 ## 🚀 Features
 
@@ -9,6 +9,8 @@ Mini-framework to create REST APIs and SQS Consumers with Python in AWS Lambda.
 - **OOP structure**: Object-oriented programming for your code
 - **Flexible MongoDB**: Direct access to multiple databases without models
 - **SQS Consumers**: Same pattern to process SQS messages
+- **SNS Publishers**: Same pattern to publish messages to SNS topics
+- **Fargate Tasks**: Same pattern to run tasks in Fargate containers
 - **Type hints**: Modern Python with type annotations
 - **Async/await**: Full support for asynchronous operations
 
@@ -73,6 +75,106 @@ from aws_python_framework.sqs.handler import sqs_handler
 title_indexed_handler = sqs_handler('title-indexed')
 
 __all__ = ['title_indexed_handler']
+```
+
+### Publish to SNS
+
+**1. Create your topic** in `src/topics/title_indexed.py`:
+
+```python
+from lambda_framework.sns.publisher import SNSPublisher
+import os
+
+class TitleIndexedTopic(SNSPublisher):
+    def __init__(self):
+        super().__init__(
+            topic_arn=os.getenv('TITLE_INDEXED_SNS_TOPIC_ARN')
+        )
+    
+    async def publish_indexed(self, constitution_id, title):
+        await self.publish({
+            'constitution_id': constitution_id,
+            'title': title,
+            'event_type': 'title_indexed'
+        })
+```
+
+**2. Use the topic** from anywhere:
+
+```python
+from src.topics.title_indexed import TitleIndexedTopic
+
+# In a consumer, API or task
+topic = TitleIndexedTopic()
+await topic.publish_indexed('123', 'My Constitution')
+```
+
+### Run a Fargate Task
+
+**1. Create your task** in `src/tasks/search_tax_by_town/task.py`:
+
+```python
+from aws_python_framework.fargate.task_base import FargateTask
+
+class SearchTaxByTownTask(FargateTask):
+    async def execute(self):
+        town = self.require_env('TOWN')
+        self.logger.info(f"Processing town: {town}")
+        
+        # Access to DB
+        docs = await self.db.smart_data.address.find({'town': town}).to_list()
+        
+        # Your logic here
+        for doc in docs:
+            # Process document
+            pass
+```
+
+**2. Create the entry point** in `src/tasks/search_tax_by_town/main.py`:
+
+```python
+from aws_python_framework.fargate.handler import fargate_handler
+import sys
+
+if __name__ == '__main__':
+    exit_code = fargate_handler('search-tax-by-town')
+    sys.exit(exit_code)
+```
+
+**3. Create the Dockerfile** in `src/tasks/search_tax_by_town/Dockerfile`:
+
+```dockerfile
+FROM python:3.10.12-slim
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt /app/framework_requirements.txt
+COPY src/tasks/search_tax_by_town/requirements.txt /app/task_requirements.txt
+RUN pip install -r /app/framework_requirements.txt && \
+    pip install -r /app/task_requirements.txt
+
+# Copy code
+COPY aws_python_framework /app/aws_python_framework
+COPY config.py /app/config.py
+COPY tasks /app/tasks
+COPY tasks/search_tax_by_town/main.py /app/main.py
+
+ENV PYTHONUNBUFFERED=1
+CMD ["python", "main.py"]
+```
+
+**4. Invoke from Lambda**:
+
+```python
+from aws_python_framework.fargate.executor import FargateExecutor
+
+def handler(event, context):
+    executor = FargateExecutor()
+    task_arn = executor.run_task(
+        'search-tax-by-town',
+        envs={'town': 'Norwalk', 'only_tax': 'true'}
+    )
+    return {'taskArn': task_arn}
 ```
 
 ## 🗄️ Access to MongoDB
@@ -164,6 +266,61 @@ class ConstitutionListAPI(API):
 MONGODB_URI=mongodb://localhost:27017
 
 ## Rest Environment Variables
+```
+
+## 📊 Advanced Features
+
+### SNS Publisher - Batch Publishing
+
+```python
+# Publish multiple messages
+topic = TitleIndexedTopic()
+await topic.publish_batch_indexed([
+    {'constitution_id': 'id1', 'title': 'Title 1'},
+    {'constitution_id': 'id2', 'title': 'Title 2'},
+    {'constitution_id': 'id3', 'title': 'Title 3'}
+])
+```
+
+### Fargate - Run multiple tasks
+
+```python
+executor = FargateExecutor()
+task_arns = executor.run_task_batch(
+    'search-tax-by-town',
+    [
+        {'town': 'Norwalk'},
+        {'town': 'Stamford'},
+        {'town': 'Bridgeport'}
+    ]
+)
+```
+
+### Fargate - Check task status
+
+```python
+executor = FargateExecutor()
+task_arn = executor.run_task('my-task', {'param': 'value'})
+
+# Check task status
+status = executor.get_task_status(task_arn)
+print(f"Status: {status['status']}")
+print(f"Started at: {status['started_at']}")
+```
+
+### SNS - Message Attributes
+
+```python
+# Publish with attributes for SNS filtering
+topic = ConstitutionCreatedTopic()
+await topic.publish_created(
+    constitution_id='123',
+    title='New Constitution',
+    country='Ecuador',
+    year=2023,
+    created_by='user_456',
+    attributes={'priority': 'high', 'region': 'latam'}
+)
 ```
 
 ## 🤝 Contributing
