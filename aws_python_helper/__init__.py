@@ -12,11 +12,13 @@ from .database.database_proxy import DatabaseProxy
 from .sns.publisher import SNSPublisher
 from .fargate.task_base import FargateTask
 from .fargate.executor import FargateExecutor
+from .lambda_standalone.base import Lambda
 
 # All handlers
 from .fargate.handler import fargate_handler
-from .api.handler import lambda_handler
+from .api.handler import api_handler
 from .sqs.handler import sqs_handler
+from .lambda_standalone.handler import lambda_handler
 
 
 __all__ = [
@@ -27,8 +29,10 @@ __all__ = [
     'SNSPublisher',
     'FargateTask',
     'FargateExecutor',
+    'Lambda',
     'fargate_handler',
-    'lambda_handler',
+    'api_handler',
     'sqs_handler',
+    'lambda_handler',
 ]
 

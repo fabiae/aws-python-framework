@@ -17,7 +17,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+def api_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Generic handler for AWS Lambda API Gateway
     

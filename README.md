@@ -1,6 +1,6 @@
 # AWS Python Framework
 
-Mini-framework to create REST APIs, SQS Consumers, SNS Publishers, and Fargate Tasks with Python in AWS Lambda.
+Mini-framework to create REST APIs, SQS Consumers, SNS Publishers, Fargate Tasks, and Standalone Lambdas with Python in AWS Lambda.
 
 ## 🚀 Features
 
@@ -11,6 +11,7 @@ Mini-framework to create REST APIs, SQS Consumers, SNS Publishers, and Fargate T
 - **SQS Consumers**: Same pattern to process SQS messages
 - **SNS Publishers**: Same pattern to publish messages to SNS topics
 - **Fargate Tasks**: Same pattern to run tasks in Fargate containers
+- **Standalone Lambdas**: Create lambdas invocable directly with AWS SDK
 - **Type hints**: Modern Python with type annotations
 - **Async/await**: Full support for asynchronous operations
 
@@ -76,6 +77,139 @@ title_indexed_handler = sqs_handler('title-indexed')
 
 __all__ = ['title_indexed_handler']
 ```
+
+### Create a Standalone Lambda
+
+Standalone lambdas are functions that can be invoked directly using the AWS SDK, without an HTTP endpoint. They're perfect for internal operations, integrations, and background processing tasks.
+
+**Differences with APIs:**
+- No API Gateway - invoked directly with AWS SDK
+- No HTTP methods or routing
+- Can be called from other lambdas, Step Functions, or any AWS service
+- Perfect for internal microservices communication
+
+**1. Create your lambda class** in `src/lambdas/generate_route.py`:
+
+```python
+from aws_python_helper.lambda_standalone.base import Lambda
+
+class GenerateRouteLambda(Lambda):
+    async def validate(self):
+        # Validate input data
+        if 'shipping_id' not in self.data:
+            raise ValueError("shipping_id is required")
+        
+        if not isinstance(self.data['shipping_id'], str):
+            raise TypeError("shipping_id must be a string")
+    
+    async def process(self):
+        # Your business logic here
+        shipping_id = self.data['shipping_id']
+        
+        # Access to MongoDB
+        shipping = await self.db.deliveries.shippings.find_one(
+            {'_id': shipping_id}
+        )
+        
+        if not shipping:
+            raise ValueError(f"Shipping {shipping_id} not found")
+        
+        # Create route
+        route = {
+            'shipping_id': shipping_id,
+            'carrier_id': shipping.get('carrier_id'),
+            'status': 'pending',
+            'created_at': datetime.utcnow()
+        }
+        
+        result = await self.db.deliveries.routes.insert_one(route)
+        
+        self.logger.info(f"Route created: {result.inserted_id}")
+        
+        # Return result
+        return {
+            'route_id': str(result.inserted_id),
+            'shipping_id': shipping_id
+        }
+```
+
+**2. Configure the handler** in `src/handlers/lambda_handler.py`:
+
+```python
+from aws_python_helper.lambda_standalone.handler import lambda_standalone_handler
+
+# Create a handler for each lambda and export it
+generate_route_handler = lambda_standalone_handler('generate-route')
+sync_carrier_handler = lambda_standalone_handler('sync-carrier')
+process_payment_handler = lambda_standalone_handler('process-payment')
+
+__all__ = [
+    'generate_route_handler',
+    'sync_carrier_handler',
+    'process_payment_handler'
+]
+```
+
+**3. Invoke from another Lambda or API** using boto3:
+
+```python
+import boto3
+import json
+
+lambda_client = boto3.client('lambda')
+
+# Invoke synchronously (RequestResponse)
+response = lambda_client.invoke(
+    FunctionName='GenerateRouteLambda',
+    InvocationType='RequestResponse',
+    Payload=json.dumps({
+        'data': {
+            'shipping_id': '507f1f77bcf86cd799439011'
+        }
+    })
+)
+
+result = json.loads(response['Payload'].read())
+# {'success': True, 'data': {'route_id': '...', 'shipping_id': '...'}}
+
+if result['success']:
+    print(f"Route created: {result['data']['route_id']}")
+else:
+    print(f"Error: {result['error']}")
+```
+
+**4. Invoke asynchronously** (fire and forget):
+
+```python
+# Invoke asynchronously (Event)
+lambda_client.invoke(
+    FunctionName='GenerateRouteLambda',
+    InvocationType='Event',  # Asynchronous
+    Payload=json.dumps({
+        'data': {
+            'shipping_id': '507f1f77bcf86cd799439011'
+        }
+    })
+)
+# Returns immediately without waiting for the result
+```
+
+**Naming Convention:**
+
+| Lambda Name (kebab-case) | Module | Class |
+|--------------------------|--------|-------|
+| `generate-route` | `src/lambdas/generate_route.py` | `GenerateRouteLambda` |
+| `sync-carrier` | `src/lambdas/sync_carrier.py` | `SyncCarrierLambda` |
+| `process-payment` | `src/lambdas/process_payment.py` | `ProcessPaymentLambda` |
+| `send-notification` | `src/lambdas/send_notification.py` | `SendNotificationLambda` |
+
+**Common Use Cases:**
+- Internal microservices communication
+- Background data processing
+- Integration with external services
+- Scheduled tasks (with EventBridge)
+- Step Functions workflows
+- Cross-service operations
 
 ### Publish to SNS
 
@@ -258,6 +392,126 @@ class ConstitutionListAPI(API):
         })
         self.set_header('X-Total-Count', str(total))
 ```
+
+## 🔗 Integration Example: API + Standalone Lambda
+
+Here's a complete example showing how an API can invoke a standalone lambda:
+
+**Scenario:** An API endpoint that creates a shipping and then asynchronously generates its route using a standalone lambda.
+
+**1. The API endpoint** (`src/api/shippings/post.py`):
+
+```python
+from aws_python_helper.api.base import API
+import boto3
+import json
+
+class ShippingPostAPI(API):
+    async def validate(self):
+        required_fields = ['customer_id', 'address', 'items']
+        for field in required_fields:
+            if field not in self.data:
+                raise ValueError(f"{field} is required")
+    
+    async def process(self):
+        # Create shipping in database
+        shipping = {
+            'customer_id': self.data['customer_id'],
+            'address': self.data['address'],
+            'items': self.data['items'],
+            'status': 'pending',
+            'route_pending': True
+        }
+        
+        result = await self.db.deliveries.shippings.insert_one(shipping)
+        shipping_id = str(result.inserted_id)
+        
+        # Invoke standalone lambda asynchronously to generate route
+        lambda_client = boto3.client('lambda')
+        lambda_client.invoke(
+            FunctionName='GenerateRouteLambda',
+            InvocationType='Event',  # Asynchronous
+            Payload=json.dumps({
+                'data': {'shipping_id': shipping_id}
+            })
+        )
+        
+        self.set_code(201)
+        self.set_body({
+            'shipping_id': shipping_id,
+            'status': 'pending',
+            'message': 'Shipping created, route generation in progress'
+        })
+```
+
+**2. The standalone lambda** (`src/lambdas/generate_route.py`):
+
+```python
+from aws_python_helper.lambda_standalone.base import Lambda
+
+class GenerateRouteLambda(Lambda):
+    async def validate(self):
+        if 'shipping_id' not in self.data:
+            raise ValueError("shipping_id is required")
+    
+    async def process(self):
+        shipping_id = self.data['shipping_id']
+        
+        # Get shipping details
+        shipping = await self.db.deliveries.shippings.find_one(
+            {'_id': shipping_id}
+        )
+        
+        if not shipping:
+            raise ValueError(f"Shipping {shipping_id} not found")
+        
+        # Generate optimal route
+        route = await self.calculate_optimal_route(shipping)
+        
+        # Save route
+        route_result = await self.db.deliveries.routes.insert_one(route)
+        
+        # Update shipping
+        await self.db.deliveries.shippings.update_one(
+            {'_id': shipping_id},
+            {'$set': {
+                'route_id': route_result.inserted_id,
+                'route_pending': False,
+                'status': 'scheduled'
+            }}
+        )
+        
+        return {
+            'route_id': str(route_result.inserted_id),
+            'shipping_id': shipping_id
+        }
+    
+    async def calculate_optimal_route(self, shipping):
+        # Your route calculation logic here
+        return {
+            'shipping_id': shipping['_id'],
+            'carrier_id': shipping.get('carrier_id'),
+            'estimated_duration': 60,
+            'status': 'pending'
+        }
+```
+
+**3. Configure handlers** (`src/handlers/lambda_handler.py`):
+
+```python
+from aws_python_helper.lambda_standalone.handler import lambda_standalone_handler
+
+generate_route_handler = lambda_standalone_handler('generate-route')
+
+__all__ = ['generate_route_handler']
+```
+
+**Benefits of this pattern:**
+- API responds immediately (better UX)
+- Route generation happens in the background
+- Decoupled services (easier to maintain)
+- Can retry lambda independently if it fails
+- Scalable architecture
 
 ## 🔐 Environment Variables
 
