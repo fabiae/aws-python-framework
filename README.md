@@ -32,7 +32,7 @@ export MONGODB_URI="mongodb://localhost:27017"
 **1. Create your API class** in `src/api/constitutions/list.py`:
 
 ```python
-from aws_python_framework.api.base import API
+from aws_python_helper.api.base import API
 
 class ConstitutionListAPI(API):
     async def process(self):
@@ -49,8 +49,8 @@ class ConstitutionListAPI(API):
 **3. Configure the generic handler** (`src/handlers/api_handler.py`):
 
 ```python
-from aws_python_framework.api.handler import lambda_handler
-handler = lambda_handler
+from aws_python_helper.api.handler import api_handler
+handler = api_handler
 ```
 
 ### Create an SQS Consumer
@@ -58,7 +58,7 @@ handler = lambda_handler
 **1. Create your consumer** in `src/consumers/title_indexed.py`:
 
 ```python
-from aws_python_framework.sqs.consumer_base import SQSConsumer
+from aws_python_helper.sqs.consumer_base import SQSConsumer
 
 class TitleIndexedConsumer(SQSConsumer):
     async def process_record(self, record):
@@ -70,7 +70,7 @@ class TitleIndexedConsumer(SQSConsumer):
 **2. Configure the handler** in `src/handlers/sqs_handler.py`:
 
 ```python
-from aws_python_framework.sqs.handler import sqs_handler
+from aws_python_helper.sqs.handler import sqs_handler
 
 # Create a handler for each consumer and export it
 title_indexed_handler = sqs_handler('title-indexed')
@@ -136,12 +136,12 @@ class GenerateRouteLambda(Lambda):
 **2. Configure the handler** in `src/handlers/lambda_handler.py`:
 
 ```python
-from aws_python_helper.lambda_standalone.handler import lambda_standalone_handler
+from aws_python_helper.lambda_standalone.handler import lambda_handler
 
 # Create a handler for each lambda and export it
-generate_route_handler = lambda_standalone_handler('generate-route')
-sync_carrier_handler = lambda_standalone_handler('sync-carrier')
-process_payment_handler = lambda_standalone_handler('process-payment')
+generate_route_handler = lambda_handler('generate-route')
+sync_carrier_handler = lambda_handler('sync-carrier')
+process_payment_handler = lambda_handler('process-payment')
 
 __all__ = [
     'generate_route_handler',
@@ -216,7 +216,7 @@ lambda_client.invoke(
 **1. Create your topic** in `src/topics/title_indexed.py`:
 
 ```python
-from lambda_framework.sns.publisher import SNSPublisher
+from aws_python_helper.sns.publisher import SNSPublisher
 import os
 
 class TitleIndexedTopic(SNSPublisher):
@@ -248,7 +248,7 @@ await topic.publish_indexed('123', 'My Constitution')
 **1. Create your task** in `src/tasks/search_tax_by_town/task.py`:
 
 ```python
-from aws_python_framework.fargate.task_base import FargateTask
+from aws_python_helper.fargate.task_base import FargateTask
 
 class SearchTaxByTownTask(FargateTask):
     async def execute(self):
@@ -267,7 +267,7 @@ class SearchTaxByTownTask(FargateTask):
 **2. Create the entry point** in `src/tasks/search_tax_by_town/main.py`:
 
 ```python
-from aws_python_framework.fargate.handler import fargate_handler
+from aws_python_helper.fargate.handler import fargate_handler
 import sys
 
 if __name__ == '__main__':
@@ -288,7 +288,7 @@ RUN pip install -r /app/framework_requirements.txt && \
     pip install -r /app/task_requirements.txt
 
 # Copy code
-COPY aws_python_framework /app/aws_python_framework
+COPY aws_python_helper /app/aws_python_helper
 COPY config.py /app/config.py
 COPY tasks /app/tasks
 COPY tasks/search_tax_by_town/main.py /app/main.py
@@ -300,7 +300,7 @@ CMD ["python", "main.py"]
 **4. Invoke from Lambda**:
 
 ```python
-from aws_python_framework.fargate.executor import FargateExecutor
+from aws_python_helper.fargate.executor import FargateExecutor
 
 def handler(event, context):
     executor = FargateExecutor()
@@ -355,7 +355,7 @@ The framework uses convention over configuration for the routing:
 
 ```python
 # src/api/constitutions/list.py
-from aws_python_framework.api.base import API
+from aws_python_helper.api.base import API
 
 class ConstitutionListAPI(API):
     async def validate(self):
@@ -499,9 +499,9 @@ class GenerateRouteLambda(Lambda):
 **3. Configure handlers** (`src/handlers/lambda_handler.py`):
 
 ```python
-from aws_python_helper.lambda_standalone.handler import lambda_standalone_handler
+from aws_python_helper.lambda_standalone.handler import lambda_handler
 
-generate_route_handler = lambda_standalone_handler('generate-route')
+generate_route_handler = lambda_handler('generate-route')
 
 __all__ = ['generate_route_handler']
 ```

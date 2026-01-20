@@ -1,5 +1,5 @@
 """
-Lambda Handler - Generic reusable handler for all APIs
+API Handler - Generic reusable handler for all APIs
 """
 
 import json

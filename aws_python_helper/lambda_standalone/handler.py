@@ -24,7 +24,7 @@ def lambda_handler(lambda_name: str) -> Callable:
     while keeping the code DRY.
     
     Usage in src/handlers/lambda_handler.py:
-        from aws_python_helper.lambda.handler import lambda_handler
+        from aws_python_helper.lambda_standalone.handler import lambda_handler
         
         generate_route_handler = lambda_handler('generate-route')
         sync_carrier_handler = lambda_handler('sync-carrier')
