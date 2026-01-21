@@ -24,7 +24,7 @@ class SQSFetcher:
         'title-indexed' -> src/consumer/title_indexed.py -> TitleIndexedConsumer
     """
     
-    CONSUMERS_FOLDER = "src/consumer"
+    CONSUMERS_FOLDER = "consumer"
     _cache = {}
     
     def __init__(self, consumer_name: str):

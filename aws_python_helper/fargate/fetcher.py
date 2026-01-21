@@ -25,7 +25,7 @@ class FargateTaskFetcher:
         'process-data' -> src/task/process-data/task.py -> ProcessDataTask
     """
     
-    TASKS_FOLDER = "src/task"
+    TASKS_FOLDER = "task"
     _cache = {}
     
     def __init__(self, task_name: str):

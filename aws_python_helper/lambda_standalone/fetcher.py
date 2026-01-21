@@ -27,7 +27,7 @@ class LambdaFetcher:
         'process-payment' -> src/lambda/process-payment/main.py -> ProcessPaymentLambda
     """
     
-    LAMBDA_FOLDER = "src/lambda"
+    LAMBDA_FOLDER = "lambda"
     _cache = {}
     
     def __init__(self, lambda_name: str):

@@ -32,8 +32,13 @@ class Dispatcher:
             event: AWS API Gateway event
         """
         # Extract information from the event
-        self.endpoint = event.get('path', '').strip('/')
-        self.method = event.get('httpMethod', 'GET').lower()
+        # Support both API Gateway v1.0 (REST API) and v2.0 (HTTP API)
+        self.endpoint = event.get('rawPath', event.get('path', '')).strip('/')
+        
+        # Extract HTTP method from v2.0 or v1.0 format
+        http_context = event.get('requestContext', {}).get('http', {})
+        self.method = http_context.get('method', event.get('httpMethod', 'GET')).lower()
+        
         self.headers = event.get('headers') or {}
         self.query_params = event.get('queryStringParameters') or {}
         

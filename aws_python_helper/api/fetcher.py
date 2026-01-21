@@ -28,7 +28,7 @@ class Fetcher:
         DELETE /users/123 -> src/api/users/delete.py
     """
     
-    API_FOLDER = "src/api"
+    API_FOLDER = "api"
     _cache = {}
     
     def __init__(self, endpoint: str, method: str):
