@@ -62,7 +62,18 @@ def fargate_handler(task_name: str = None):
         task = fetcher.get_task(envs=envs)
         
         # Execute task
-        result = asyncio.run(task.run())
+        # Use get_event_loop() instead of asyncio.run() to avoid closing the loop
+        # This is important for container reuse with Motor/MongoDB
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        result = loop.run_until_complete(task.run())
         
         if result:
             logger.info(f"Task {task_name} completed successfully")

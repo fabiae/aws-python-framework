@@ -52,7 +52,19 @@ def api_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     try:
         # Create dispatcher and execute
         dispatcher = Dispatcher(event)
-        response = asyncio.run(dispatcher.dispatch())
+        
+        # Use get_event_loop() instead of asyncio.run() to avoid closing the loop
+        # This is important for AWS Lambda container reuse with Motor/MongoDB
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        
+        response = loop.run_until_complete(dispatcher.dispatch())
         
         # Format response for API Gateway
         api_gateway_response = {

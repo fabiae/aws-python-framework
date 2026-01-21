@@ -66,7 +66,18 @@ def sqs_handler(consumer_name: str) -> Callable:
             logger.info(f"Processing {len(records)} records")
             
             # Process batch
-            results = asyncio.run(consumer.process_batch(records))
+            # Use get_event_loop() instead of asyncio.run() to avoid closing the loop
+            # This is important for AWS Lambda container reuse with Motor/MongoDB
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_closed():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            results = loop.run_until_complete(consumer.process_batch(records))
             
             # Count successes and failures
             success_count = sum(1 for r in results if r['success'])

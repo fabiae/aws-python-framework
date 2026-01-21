@@ -80,7 +80,18 @@ def lambda_handler(lambda_name: str) -> Callable:
             lambda_instance = fetcher.get_lambda(event, context)
             
             # Execute lambda
-            result = asyncio.run(lambda_instance.run())
+            # Use get_event_loop() instead of asyncio.run() to avoid closing the loop
+            # This is important for AWS Lambda container reuse with Motor/MongoDB
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_closed():
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            result = loop.run_until_complete(lambda_instance.run())
             
             logger.info(f"Lambda {lambda_name} executed successfully")
             return result
