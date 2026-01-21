@@ -18,15 +18,17 @@ class Fetcher:
     Fetcher of the framework, determines which file to load based on
     the endpoint and HTTP method using convention over configuration.
     
+    Searches for APIs in the 'src/api/' folder.
+    
     Examples:
-        GET /users        -> api/users/list.py
-        GET /users/123    -> api/users/get.py
-        POST /users       -> api/users/post.py
-        PUT /users/123    -> api/users/put.py
-        DELETE /users/123 -> api/users/delete.py
+        GET /users        -> src/api/users/list.py
+        GET /users/123    -> src/api/users/get.py
+        POST /users       -> src/api/users/post.py
+        PUT /users/123    -> src/api/users/put.py
+        DELETE /users/123 -> src/api/users/delete.py
     """
     
-    API_FOLDER = "api"
+    API_FOLDER = "src/api"
     _cache = {}
     
     def __init__(self, endpoint: str, method: str):

@@ -83,16 +83,3 @@ def lambda_handler(lambda_name: str) -> Callable:
             }
     
     return handler
-
-
-def create_lambda_handler(lambda_name: str) -> Callable:
-    """
-    Alias of lambda_handler for clarity
-    
-    Args:
-        lambda_name: Name of the lambda in kebab-case
-    
-    Returns:
-        Configured handler function
-    """
-    return lambda_handler(lambda_name)

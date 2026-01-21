@@ -66,14 +66,3 @@ def fargate_handler(task_name: str = None):
         logger.exception(f"Unhandled exception in Fargate handler: {e}")
         return 1
 
-
-if __name__ == '__main__':
-    """
-    Entry point when executed directly
-    
-    Uso:
-        TASK_NAME=search-tax-by-town python -m fargate.handler
-    """
-    exit_code = fargate_handler()
-    sys.exit(exit_code)
-

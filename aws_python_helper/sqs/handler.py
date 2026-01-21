@@ -85,16 +85,3 @@ def sqs_handler(consumer_name: str) -> Callable:
     
     return handler
 
-
-def create_sqs_handler(consumer_name: str) -> Callable:
-    """
-    Alias of sqs_handler for clarity
-    
-    Args:
-        consumer_name: Name of the consumer
-    
-    Returns:
-        Configured handler function
-    """
-    return sqs_handler(consumer_name)
-

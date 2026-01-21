@@ -14,11 +14,17 @@ class SQSFetcher:
     """
     Dynamically load SQS consumers
     
-    Similar to the API Fetcher but for SQS consumers.
-    Searches for consumers in the 'consumers/' folder by name.
+    Searches for consumers as direct files in 'src/consumer/' folder.
+    
+    Convention:
+        consumer-name -> src/consumer/consumer_name.py -> ConsumerNameConsumer
+    
+    Examples:
+        'user-created' -> src/consumer/user_created.py -> UserCreatedConsumer
+        'title-indexed' -> src/consumer/title_indexed.py -> TitleIndexedConsumer
     """
     
-    CONSUMERS_FOLDER = "consumers"
+    CONSUMERS_FOLDER = "src/consumer"
     _cache = {}
     
     def __init__(self, consumer_name: str):
@@ -26,7 +32,7 @@ class SQSFetcher:
         Initialize the fetcher
         
         Args:
-            consumer_name: Name of the consumer (e.g.: 'user-created')
+            consumer_name: Name of the consumer in kebab-case (e.g.: 'user-created')
         """
         self.consumer_name = consumer_name
     
@@ -72,7 +78,7 @@ class SQSFetcher:
         if not os.path.exists(file_path):
             raise FileNotFoundError(
                 f"Consumer not found: {file_path}\n"
-                f"Expected file for consumer '{self.consumer_name}'"
+                f"Expected file for consumer '{self.consumer_name}' at {self.CONSUMERS_FOLDER}/{self.consumer_name.replace('-', '_')}.py"
             )
         
         # Load module dynamically
@@ -84,6 +90,11 @@ class SQSFetcher:
         spec.loader.exec_module(module)
         
         # Search for class that inherits from SQSConsumer
+        # Expected class name: 'user-created' -> 'UserCreatedConsumer'
+        class_name = ''.join(
+            word.capitalize() for word in self.consumer_name.split('-')
+        ) + 'Consumer'
+        
         consumer_class = None
         for item_name in dir(module):
             item = getattr(module, item_name)
@@ -96,7 +107,8 @@ class SQSFetcher:
         if not consumer_class:
             raise ValueError(
                 f"No SQSConsumer class found in {file_path}\n"
-                f"Make sure your file exports a class that inherits from SQSConsumer"
+                f"Make sure your file exports a class that inherits from SQSConsumer\n"
+                f"Expected class name: {class_name}"
             )
         
         # Cache the class
@@ -105,4 +117,3 @@ class SQSFetcher:
         
         # Return new instance
         return consumer_class()
-

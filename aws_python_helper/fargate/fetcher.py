@@ -15,14 +15,17 @@ class FargateTaskFetcher:
     """
     Dynamically load Fargate tasks
     
-    Similar to SQSFetcher but for Fargate tasks.
-    Searches for tasks in the 'tasks/' folder by name.
+    Searches for tasks in folders within 'src/task/' with a task.py file inside.
     
-    Example:
-        'search-tax-by-town' -> tasks/search_tax_by_town/task.py -> SearchTaxByTownTask
+    Convention:
+        task-name -> src/task/task-name/task.py -> TaskNameTask
+    
+    Examples:
+        'search-tax-by-town' -> src/task/search-tax-by-town/task.py -> SearchTaxByTownTask
+        'process-data' -> src/task/process-data/task.py -> ProcessDataTask
     """
     
-    TASKS_FOLDER = "tasks"
+    TASKS_FOLDER = "src/task"
     _cache = {}
     
     def __init__(self, task_name: str):
@@ -30,7 +33,7 @@ class FargateTaskFetcher:
         Initializes the fetcher
         
         Args:
-            task_name: Name of the task (e.g.: 'search-tax-by-town')
+            task_name: Name of the task in kebab-case (e.g.: 'search-tax-by-town')
         """
         self.task_name = task_name
     
@@ -39,13 +42,13 @@ class FargateTaskFetcher:
         """
         Calculates the path of the task file
         
-        Converts 'search-tax-by-town' to 'search_tax_by_town/task.py'
+        Converts 'search-tax-by-town' to 'search-tax-by-town/task.py'
         
         Returns:
             Absolute path to the task file
         """
-        # Convert dashes to underscores for Python folder name
-        folder_name = self.task_name.replace('-', '_')
+        # Keep kebab-case for folder name
+        folder_name = self.task_name
         
         base_path = Path(os.getcwd()) / self.TASKS_FOLDER / folder_name
         file_path = base_path / 'task.py'
@@ -74,7 +77,7 @@ class FargateTaskFetcher:
         if not os.path.exists(file_path):
             raise FileNotFoundError(
                 f"Task not found: {file_path}\n"
-                f"Expected file for task '{self.task_name}'"
+                f"Expected file for task '{self.task_name}' at {self.TASKS_FOLDER}/{self.task_name}/task.py"
             )
         
         # Load module dynamically
@@ -86,6 +89,11 @@ class FargateTaskFetcher:
         spec.loader.exec_module(module)
         
         # Search for a class that inherits from FargateTask
+        # Expected class name: 'search-tax-by-town' -> 'SearchTaxByTownTask'
+        class_name = ''.join(
+            word.capitalize() for word in self.task_name.split('-')
+        ) + 'Task'
+        
         task_class = None
         for item_name in dir(module):
             item = getattr(module, item_name)
@@ -98,11 +106,11 @@ class FargateTaskFetcher:
         if not task_class:
             raise ValueError(
                 f"No FargateTask class found in {file_path}\n"
-                f"Make sure your file exports a class that inherits from FargateTask"
+                f"Make sure your file exports a class that inherits from FargateTask\n"
+                f"Expected class name: {class_name}"
             )
         
         logger.info(f"Loaded task: {task_class.__name__} from {file_path}")
         
         # Return new instance with envs
         return task_class(envs=envs)
-
