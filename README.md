@@ -576,12 +576,56 @@ __all__ = ['generate_route_handler']
 
 ## 🔐 Environment Variables
 
+### MongoDB Configuration
+
+El framework soporta dos formas de configurar MongoDB:
+
+#### Opción 1: Connection String Completa
+
 ```bash
-# MongoDB Required Environment Variable
-MONGODB_URI=mongodb://localhost:27017
+# URI completa con credenciales incluidas
+MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/dbname?retryWrites=true&w=majority
+# o
+MONGO_DB_URI=mongodb+srv://user:password@cluster.mongodb.net/dbname
+```
+
+#### Opción 2: Componentes Separados (Recomendado para Terraform)
+
+```bash
+# Host sin credenciales
+MONGO_DB_HOST=mongodb+srv://cluster.mongodb.net
+
+# Credenciales separadas (más seguro)
+MONGO_DB_USER=admin
+MONGO_DB_PASSWORD=my-secure-password
+
+# Opcionales
+MONGO_DB_NAME=my_database
+MONGO_DB_OPTIONS=retryWrites=true&w=majority
+```
+
+**Ventajas de usar componentes separados:**
+- ✅ Mejor seguridad: credenciales separadas del host
+- ✅ Fácil integración con Terraform/AWS Secrets Manager
+- ✅ Contraseñas con caracteres especiales se manejan automáticamente
+- ✅ Más flexible para diferentes entornos
+
+El framework automáticamente:
+1. URL-encodea la contraseña (maneja `@`, `:`, `/`, etc.)
+2. Construye la URI completa
+3. Inicializa la conexión
+
+### Ejemplo en Terraform
+
+```hcl
+environment_variables = {
+  MONGO_DB_HOST     = module.mongodb.connection_string
+  MONGO_DB_USER     = module.mongodb.database_user
+  MONGO_DB_PASSWORD = module.mongodb.database_password
+}
+```
 
 ## Rest Environment Variables
-```
 
 ## 📊 Advanced Features
 
