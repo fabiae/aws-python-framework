@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aws-python-helper"
-version = "0.1.0"
-description = "AWS Python Helper"
+version = "0.2.0"
+description = "AWS Python Helper Framework"
 readme = "README.md"
 requires-python = ">=3.9"
 
@@ -16,12 +16,4 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-
-[tool.setuptools.packages.find.aws_python_framework]
-where = ["aws_python_helper"]
-
-[tool.setuptools.packages.find.tests]
-where = ["tests"]
-
-[tool.setuptools.packages.find.tests.aws_python_framework]
-where = ["tests/aws_python_helper"]
+include = ["aws_python_helper"]
