@@ -61,8 +61,8 @@ class Lambda(ABC):
             DatabaseProxy instance for accessing MongoDB
         """
         if self._db is None:
-            from aws_python_helper.database.mongo_manager import MongoManager
-            from aws_python_helper.database.database_proxy import DatabaseProxy
+            from ..database.mongo_manager import MongoManager
+            from ..database.database_proxy import DatabaseProxy
             self._db = DatabaseProxy(MongoManager)
         return self._db
     

@@ -65,6 +65,17 @@ def lambda_handler(lambda_name: str) -> Callable:
         logger.info(f"Lambda: {lambda_name}")
         logger.debug(f"Event: {event}")
         
+        # Initialize MongoDB connection (only once, reused in subsequent invocations)
+        try:
+            from ..database.mongo_manager import MongoManager
+            import os
+            mongo_uri = os.getenv('MONGO_DB_URI') or os.getenv('MONGODB_URI')
+            if mongo_uri and not MongoManager.is_initialized():
+                logger.info("Initializing MongoDB connection")
+                MongoManager.initialize(mongo_uri)
+        except Exception as e:
+            logger.warning(f"MongoDB initialization skipped: {e}")
+        
         try:
             # Load lambda class
             fetcher = LambdaFetcher(lambda_name)

@@ -48,6 +48,16 @@ def fargate_handler(task_name: str = None):
         envs = dict(os.environ)
         logger.info(f"Environment variables loaded: {len(envs)} vars")
         
+        # Initialize MongoDB connection
+        try:
+            from ..database.mongo_manager import MongoManager
+            mongo_uri = os.getenv('MONGO_DB_URI') or os.getenv('MONGODB_URI')
+            if mongo_uri and not MongoManager.is_initialized():
+                logger.info("Initializing MongoDB connection")
+                MongoManager.initialize(mongo_uri)
+        except Exception as e:
+            logger.warning(f"MongoDB initialization skipped: {e}")
+        
         # Load task
         fetcher = FargateTaskFetcher(task_name)
         task = fetcher.get_task(envs=envs)

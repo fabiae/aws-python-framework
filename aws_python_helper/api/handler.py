@@ -40,6 +40,17 @@ def api_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     logger.info(f"Request ID: {request_id}")
     logger.debug(f"Event: {json.dumps(event)}")
     
+    # Initialize MongoDB connection (only once, reused in subsequent invocations)
+    try:
+        from ..database.mongo_manager import MongoManager
+        import os
+        mongo_uri = os.getenv('MONGO_DB_URI') or os.getenv('MONGODB_URI')
+        if mongo_uri and not MongoManager.is_initialized():
+            logger.info("Initializing MongoDB connection")
+            MongoManager.initialize(mongo_uri)
+    except Exception as e:
+        logger.warning(f"MongoDB initialization skipped: {e}")
+    
     try:
         # Create dispatcher and execute
         dispatcher = Dispatcher(event)
