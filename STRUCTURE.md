@@ -24,11 +24,11 @@ your-project/
 │   │   └── payment_completed.py           # PaymentCompletedConsumer
 │   │
 │   ├── lambda/                             # Standalone Lambdas (folders)
-│   │   ├── GenerateRoute/
+│   │   ├── generate-route/
 │   │   │   └── main.py                    # GenerateRouteLambda
-│   │   ├── SyncCarrier/
+│   │   ├── sync-carrier/
 │   │   │   └── main.py                    # SyncCarrierLambda
-│   │   └── ProcessPayment/
+│   │   └── process-payment/
 │   │       └── main.py                    # ProcessPaymentLambda
 │   │
 │   ├── task/                              # Fargate Tasks (folders)
@@ -86,13 +86,13 @@ your-project/
 
 | Handler Name (kebab-case) | Folder Path | File | Class Name |
 |---------------------------|-------------|------|------------|
-| `generate-route` | `src/lambda/GenerateRoute/` | `main.py` | `GenerateRouteLambda` |
-| `sync-carrier` | `src/lambda/SyncCarrier/` | `main.py` | `SyncCarrierLambda` |
-| `process-payment` | `src/lambda/ProcessPayment/` | `main.py` | `ProcessPaymentLambda` |
+| `generate-route` | `src/lambda/generate-route/` | `main.py` | `GenerateRouteLambda` |
+| `sync-carrier` | `src/lambda/sync-carrier/` | `main.py` | `SyncCarrierLambda` |
+| `process-payment` | `src/lambda/process-payment/` | `main.py` | `ProcessPaymentLambda` |
 
 **Conventions:**
 - Handler names use **kebab-case**
-- Folders use **PascalCase**
+- Folders use **kebab-case** (consistent with tasks)
 - File is always `main.py`
 - Classes use **PascalCase + Lambda** suffix
 
@@ -152,7 +152,7 @@ __all__ = ['user_created_handler']
 
 ### Standalone Lambda Example
 ```python
-# src/lambda/GenerateRoute/main.py
+# src/lambda/generate-route/main.py
 from aws_python_helper.lambda_standalone.base import Lambda
 
 class GenerateRouteLambda(Lambda):
@@ -205,7 +205,7 @@ if __name__ == '__main__':
 |-----------|--------|-----------|--------------|
 | **API** | kebab-case folder | `src/api/{resource}/{method}.py` | `API` |
 | **Consumer** | kebab-case handler | `src/consumer/{name}.py` | `Consumer` |
-| **Lambda** | kebab-case handler | `src/lambda/{PascalCase}/main.py` | `Lambda` |
+| **Lambda** | kebab-case handler | `src/lambda/{kebab-case}/main.py` | `Lambda` |
 | **Task** | kebab-case handler | `src/task/{kebab-case}/task.py` | `Task` |
 
 ## 🔄 Conversion Examples
@@ -214,15 +214,15 @@ if __name__ == '__main__':
 
 ```
 Handler: 'user-created'
-→ Consumer: src/consumers/user_created.py (snake_case file)
+→ Consumer: src/consumer/user_created.py (snake_case file)
 → Class: UserCreatedConsumer
 
 Handler: 'generate-route'
-→ Lambda: src/lambda/GenerateRoute/main.py (PascalCase folder)
+→ Lambda: src/lambda/generate-route/main.py (kebab-case folder)
 → Class: GenerateRouteLambda
 
 Handler: 'search-tax-by-town'
-→ Task: src/tasks/search-tax-by-town/task.py (kebab-case folder)
+→ Task: src/task/search-tax-by-town/task.py (kebab-case folder)
 → Class: SearchTaxByTownTask
 ```
 
@@ -230,7 +230,7 @@ Handler: 'search-tax-by-town'
 
 - **Why different conventions?**
   - Consumers as files: Simple, most don't need multiple files
-  - Lambdas in PascalCase folders: Easy to identify in deployment
+  - Lambdas in kebab-case folders: Consistent with tasks, Python-friendly
   - Tasks in kebab-case folders: Consistent with URL patterns
   
 - **Scalability**: If a consumer grows complex, you can convert it to a folder structure later without breaking the framework

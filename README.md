@@ -46,11 +46,11 @@ your-project/
     │   └── order_processed.py         # order-processed -> OrderProcessedConsumer
     │
     ├── lambda/                        # Standalone Lambdas (folders)
-    │   ├── GenerateRoute/             # generate-route -> GenerateRouteLambda
+    │   ├── generate-route/            # generate-route -> GenerateRouteLambda
     │   │   └── main.py
-    │   ├── SyncCarrier/               # sync-carrier -> SyncCarrierLambda
+    │   ├── sync-carrier/              # sync-carrier -> SyncCarrierLambda
     │   │   └── main.py
-    │   └── ProcessPayment/            # process-payment -> ProcessPaymentLambda
+    │   └── process-payment/           # process-payment -> ProcessPaymentLambda
     │       └── main.py
     │
     └── task/                         # Fargate Tasks (folders)
@@ -70,13 +70,13 @@ The framework uses automatic class name detection based on your folder/file stru
 |------|--------------|-----------|------------|
 | **API** | N/A | `src/api/users/list.py` | `UsersListAPI` |
 | **Consumer** | `user-created` | `src/consumer/user_created.py` | `UserCreatedConsumer` |
-| **Lambda** | `generate-route` | `src/lambda/GenerateRoute/main.py` | `GenerateRouteLambda` |
+| **Lambda** | `generate-route` | `src/lambda/generate-route/main.py` | `GenerateRouteLambda` |
 | **Task** | `search-tax-by-town` | `src/task/search-tax-by-town/task.py` | `SearchTaxByTownTask` |
 
 **Rules:**
 - Handler names use **kebab-case** (e.g., `user-created`, `generate-route`)
 - Consumer files use **snake_case** (e.g., `user_created.py`)
-- Lambda folders use **PascalCase** (e.g., `GenerateRoute/`)
+- Lambda folders use **kebab-case** (e.g., `generate-route/`)
 - Task folders use **kebab-case** (e.g., `search-tax-by-town/`)
 - Class names always use **PascalCase** with suffix (e.g., `UserCreatedConsumer`)
 
@@ -110,7 +110,7 @@ handler = api_handler
 
 ### Create an SQS Consumer
 
-**1. Create your consumer** in `src/consumers/title_indexed.py`:
+**1. Create your consumer** in `src/consumer/title_indexed.py`:
 
 ```python
 from aws_python_helper.sqs.consumer_base import SQSConsumer
@@ -143,7 +143,7 @@ Standalone lambdas are functions that can be invoked directly using the AWS SDK,
 - Can be called from other lambdas, Step Functions, or any AWS service
 - Perfect for internal microservices communication
 
-**1. Create your lambda class** in `src/lambda/GenerateRoute/main.py`:
+**1. Create your lambda class** in `src/lambda/generate-route/main.py`:
 
 ```python
 from aws_python_helper.lambda_standalone.base import Lambda
@@ -207,7 +207,7 @@ __all__ = [
 ```
 
 **Note:** The handler name `'generate-route'` (kebab-case) will automatically look for:
-- Folder: `src/lambda/GenerateRoute/` (PascalCase)
+- Folder: `src/lambda/generate-route/` (kebab-case)
 - File: `main.py`
 - Class: `GenerateRouteLambda`
 
@@ -259,10 +259,10 @@ lambda_client.invoke(
 
 | Lambda Name (kebab-case) | Folder | File | Class |
 |--------------------------|--------|------|-------|
-| `generate-route` | `src/lambda/GenerateRoute/` | `main.py` | `GenerateRouteLambda` |
-| `sync-carrier` | `src/lambda/SyncCarrier/` | `main.py` | `SyncCarrierLambda` |
-| `process-payment` | `src/lambda/ProcessPayment/` | `main.py` | `ProcessPaymentLambda` |
-| `send-notification` | `src/lambda/SendNotification/` | `main.py` | `SendNotificationLambda` |
+| `generate-route` | `src/lambda/generate-route/` | `main.py` | `GenerateRouteLambda` |
+| `sync-carrier` | `src/lambda/sync-carrier/` | `main.py` | `SyncCarrierLambda` |
+| `process-payment` | `src/lambda/process-payment/` | `main.py` | `ProcessPaymentLambda` |
+| `send-notification` | `src/lambda/send-notification/` | `main.py` | `SendNotificationLambda` |
 
 **Common Use Cases:**
 - Internal microservices communication
@@ -306,7 +306,7 @@ await topic.publish_indexed('123', 'My Constitution')
 
 ### Run a Fargate Task
 
-**1. Create your task** in `src/tasks/search_tax_by_town/task.py`:
+**1. Create your task** in `src/task/search-tax-by-town/task.py`:
 
 ```python
 from aws_python_helper.fargate.task_base import FargateTask
@@ -325,7 +325,7 @@ class SearchTaxByTownTask(FargateTask):
             pass
 ```
 
-**2. Create the entry point** in `src/tasks/search_tax_by_town/main.py`:
+**2. Create the entry point** in `src/task/search-tax-by-town/main.py`:
 
 ```python
 from aws_python_helper.fargate.handler import fargate_handler
@@ -336,7 +336,7 @@ if __name__ == '__main__':
     sys.exit(exit_code)
 ```
 
-**3. Create the Dockerfile** in `src/tasks/search_tax_by_town/Dockerfile`:
+**3. Create the Dockerfile** in `src/task/search-tax-by-town/Dockerfile`:
 
 ```dockerfile
 FROM python:3.10.12-slim
@@ -344,15 +344,15 @@ WORKDIR /app
 
 # Install dependencies
 COPY requirements.txt /app/framework_requirements.txt
-COPY src/tasks/search_tax_by_town/requirements.txt /app/task_requirements.txt
+COPY src/task/search-tax-by-town/requirements.txt /app/task_requirements.txt
 RUN pip install -r /app/framework_requirements.txt && \
     pip install -r /app/task_requirements.txt
 
 # Copy code
 COPY aws_python_helper /app/aws_python_helper
 COPY config.py /app/config.py
-COPY tasks /app/tasks
-COPY tasks/search_tax_by_town/main.py /app/main.py
+COPY task /app/task
+COPY task/search-tax-by-town/main.py /app/main.py
 
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "main.py"]
@@ -505,7 +505,7 @@ class ShippingPostAPI(API):
         })
 ```
 
-**2. The standalone lambda** (`src/lambda/GenerateRoute/main.py`):
+**2. The standalone lambda** (`src/lambda/generate-route/main.py`):
 
 ```python
 from aws_python_helper.lambda_standalone.base import Lambda

@@ -24,7 +24,7 @@ def sqs_handler(consumer_name: str) -> Callable:
     while keeping the code DRY.
     
     Args:
-        consumer_name: Name of the consumer (must exist in consumers/)
+        consumer_name: Name of the consumer (must exist in consumer/)
     
     Returns:
         Configured handler function for that consumer

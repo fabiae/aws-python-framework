@@ -19,12 +19,12 @@ class LambdaFetcher:
     a main.py file inside.
     
     Convention:
-        lambda-name -> src/lambda/LambdaName/main.py -> LambdaNameLambda
+        lambda-name -> src/lambda/lambda-name/main.py -> LambdaNameLambda
     
     Examples:
-        'generate-route' -> src/lambda/GenerateRoute/main.py -> GenerateRouteLambda
-        'sync-carrier' -> src/lambda/SyncCarrier/main.py -> SyncCarrierLambda
-        'process-payment' -> src/lambda/ProcessPayment/main.py -> ProcessPaymentLambda
+        'generate-route' -> src/lambda/generate-route/main.py -> GenerateRouteLambda
+        'sync-carrier' -> src/lambda/sync-carrier/main.py -> SyncCarrierLambda
+        'process-payment' -> src/lambda/process-payment/main.py -> ProcessPaymentLambda
     """
     
     LAMBDA_FOLDER = "src/lambda"
@@ -44,16 +44,13 @@ class LambdaFetcher:
         """
         Calculate the path of the lambda file
         
-        Converts 'generate-route' to 'GenerateRoute/main.py'
+        Converts 'generate-route' to 'generate-route/main.py'
         
         Returns:
             Absolute path to the lambda file
         """
-        # Convert kebab-case to PascalCase for folder name
-        # Example: 'generate-route' -> 'GenerateRoute'
-        folder_name = ''.join(
-            word.capitalize() for word in self.lambda_name.split('-')
-        )
+        # Keep kebab-case for folder name (consistent with tasks)
+        folder_name = self.lambda_name
         
         base_path = Path(os.getcwd()) / self.LAMBDA_FOLDER / folder_name
         file_path = base_path / 'main.py'
@@ -86,12 +83,9 @@ class LambdaFetcher:
         
         # Verify that the file exists
         if not os.path.exists(file_path):
-            folder_name = ''.join(
-                word.capitalize() for word in self.lambda_name.split('-')
-            )
             raise FileNotFoundError(
                 f"Lambda not found: {file_path}\n"
-                f"Expected file for lambda '{self.lambda_name}' at {self.LAMBDA_FOLDER}/{folder_name}/main.py"
+                f"Expected file for lambda '{self.lambda_name}' at {self.LAMBDA_FOLDER}/{self.lambda_name}/main.py"
             )
         
         # Load module dynamically
@@ -130,4 +124,5 @@ class LambdaFetcher:
         
         # Return new instance
         return lambda_class(event, context)
+
 
