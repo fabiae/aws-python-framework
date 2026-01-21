@@ -16,4 +16,4 @@ dependencies = [
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["aws_python_helper"]
+include = ["aws_python_helper*"]
