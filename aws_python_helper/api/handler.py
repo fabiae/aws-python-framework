@@ -8,6 +8,8 @@ import logging
 from typing import Dict, Any
 
 from .dispatcher import Dispatcher
+from ..utils.json_encoder import MongoJSONEncoder
+from ..database.mongo_manager import MongoManager
 
 # Configure logging
 logging.basicConfig(
@@ -42,7 +44,6 @@ def api_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     
     # Initialize MongoDB connection (only once, reused in subsequent invocations)
     try:
-        from ..database.mongo_manager import MongoManager
         if not MongoManager.is_initialized():
             logger.info("Initializing MongoDB connection")
             MongoManager.initialize()
@@ -76,7 +77,7 @@ def api_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
                 **response.get('headers', {})
             },
-            'body': json.dumps(response['body'], ensure_ascii=False)
+            'body': json.dumps(response['body'], cls=MongoJSONEncoder, ensure_ascii=False)
         }
         
         logger.info(f"Response: {response['code']}")
@@ -95,6 +96,6 @@ def api_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'body': json.dumps({
                 'error': 'Internal Server Error',
                 'message': 'An unexpected error occurred'
-            })
+            }, cls=MongoJSONEncoder)
         }
 

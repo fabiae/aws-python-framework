@@ -7,6 +7,8 @@ import logging
 from typing import Dict, Any, Callable
 
 from .fetcher import SQSFetcher
+from ..utils.serializer import serialize_mongo_types
+from ..database.mongo_manager import MongoManager
 
 # Configure logging
 logging.basicConfig(
@@ -49,7 +51,6 @@ def sqs_handler(consumer_name: str) -> Callable:
         
         # Initialize MongoDB connection (only once, reused in subsequent invocations)
         try:
-            from ..database.mongo_manager import MongoManager
             if not MongoManager.is_initialized():
                 logger.info("Initializing MongoDB connection")
                 MongoManager.initialize()
@@ -86,10 +87,16 @@ def sqs_handler(consumer_name: str) -> Callable:
             response = {
                 'processed': len(results),
                 'successful': success_count,
-                'failed': error_count
+                'failed': error_count,
+                'results': results  # Include detailed results
             }
             
-            logger.info(f"Processing complete: {response}")
+            # Serialize MongoDB types to JSON-serializable types
+            # AWS Lambda will serialize the return value to JSON, so we need to ensure
+            # all MongoDB types (ObjectId, datetime, etc.) are converted first
+            response = serialize_mongo_types(response)
+            
+            logger.info(f"Processing complete: {response['processed']} records")
             
             return response
             

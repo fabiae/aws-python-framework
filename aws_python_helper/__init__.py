@@ -20,6 +20,10 @@ from .api.handler import api_handler
 from .sqs.handler import sqs_handler
 from .lambda_standalone.handler import lambda_handler
 
+# Utils
+from .utils.json_encoder import MongoJSONEncoder, mongo_json_dumps
+from .utils.serializer import serialize_mongo_types
+
 
 __all__ = [
     'API',
@@ -34,5 +38,8 @@ __all__ = [
     'api_handler',
     'sqs_handler',
     'lambda_handler',
+    'MongoJSONEncoder',
+    'mongo_json_dumps',
+    'serialize_mongo_types',
 ]
 

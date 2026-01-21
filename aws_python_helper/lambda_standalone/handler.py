@@ -8,6 +8,8 @@ import json
 from typing import Dict, Any, Callable
 
 from .fetcher import LambdaFetcher
+from ..utils.serializer import serialize_mongo_types
+from ..database.mongo_manager import MongoManager
 
 # Configure logging
 logging.basicConfig(
@@ -67,7 +69,6 @@ def lambda_handler(lambda_name: str) -> Callable:
         
         # Initialize MongoDB connection (only once, reused in subsequent invocations)
         try:
-            from ..database.mongo_manager import MongoManager
             if not MongoManager.is_initialized():
                 logger.info("Initializing MongoDB connection")
                 MongoManager.initialize()
@@ -92,6 +93,11 @@ def lambda_handler(lambda_name: str) -> Callable:
                 asyncio.set_event_loop(loop)
             
             result = loop.run_until_complete(lambda_instance.run())
+            
+            # Serialize MongoDB types to JSON-serializable types
+            # AWS Lambda will serialize the return value to JSON, so we need to ensure
+            # all MongoDB types (ObjectId, datetime, etc.) are converted first
+            result = serialize_mongo_types(result)
             
             logger.info(f"Lambda {lambda_name} executed successfully")
             return result

@@ -178,7 +178,8 @@ class SNSPublisher(ABC):
             ValueError: If the message is not serializable
         """
         try:
-            return json.dumps(message, ensure_ascii=False, default=str)
+            from ..utils.json_encoder import MongoJSONEncoder
+            return json.dumps(message, cls=MongoJSONEncoder, ensure_ascii=False)
         except (TypeError, ValueError) as e:
             raise ValueError(f"Message is not JSON serializable: {e}")
     
