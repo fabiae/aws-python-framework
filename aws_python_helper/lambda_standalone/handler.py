@@ -4,6 +4,7 @@ Lambda Handler - Generic reusable handler for standalone Lambda functions
 
 import asyncio
 import logging
+import json
 from typing import Dict, Any, Callable
 
 from .fetcher import LambdaFetcher
@@ -54,9 +55,12 @@ def lambda_handler(lambda_name: str) -> Callable:
             {'success': True, 'data': <result>} or
             {'success': False, 'error': <error_message>}
         """
-        
+
+        print(f"Event: {json.dumps(event)}")
+        print(f"Context: {context}")
+    
         # Log the request
-        request_id = context.request_id if context else 'local'
+        request_id = context.aws_request_id if context else 'local'
         logger.info(f"Lambda Handler - Request ID: {request_id}")
         logger.info(f"Lambda: {lambda_name}")
         logger.debug(f"Event: {event}")

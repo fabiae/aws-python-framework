@@ -31,9 +31,12 @@ def api_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         Response of API Gateway with statusCode, body and headers
     """
+
+    print(f"Event: {json.dumps(event)}")
+    print(f"Context: {context}")
     
     # Log the request
-    request_id = context.request_id if context else 'local'
+    request_id = context.aws_request_id if context else 'local'
     logger.info(f"Request ID: {request_id}")
     logger.debug(f"Event: {json.dumps(event)}")
     
