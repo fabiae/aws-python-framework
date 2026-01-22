@@ -5,6 +5,7 @@ Dispatcher - Orchestrates the execution flow of APIs
 from typing import Dict, Any
 import logging
 import json
+import os
 
 from .fetcher import Fetcher
 from .base import API
@@ -72,15 +73,23 @@ class Dispatcher:
             # 1. Prepare - Load controller and inject properties
             api = self._prepare()
             
-            # 2. Validate
+            # 2. Authenticate (if required)
+            require_auth = os.getenv('REQUIRE_AUTH', 'false').lower() == 'true'
+            if require_auth:
+                logger.debug("Authentication required, executing middleware")
+                await self._authenticate(api)
+            else:
+                logger.debug("Authentication not required, skipping middleware")
+            
+            # 3. Validate
             logger.debug("Executing validate()")
             await api.validate()
             
-            # 3. Process
+            # 4. Process
             logger.debug("Executing process()")
             await api.process()
             
-            # 4. If no code was set, use 200 by default
+            # 5. If no code was set, use 200 by default
             if api.response['code'] is None:
                 api.set_code(200)
             
@@ -112,6 +121,45 @@ class Dispatcher:
             }
         
         except Exception as e:
+            # Check if it's an authentication error
+            from .exceptions import UnauthorizedError, ForbiddenError, AuthenticationError
+            
+            if isinstance(e, UnauthorizedError):
+                # 401 Unauthorized
+                logger.warning(f"Unauthorized: {e}")
+                return {
+                    'code': 401,
+                    'body': {
+                        'error': 'Unauthorized',
+                        'message': str(e)
+                    },
+                    'headers': {}
+                }
+            
+            elif isinstance(e, ForbiddenError):
+                # 403 Forbidden
+                logger.warning(f"Forbidden: {e}")
+                return {
+                    'code': 403,
+                    'body': {
+                        'error': 'Forbidden',
+                        'message': str(e)
+                    },
+                    'headers': {}
+                }
+            
+            elif isinstance(e, AuthenticationError):
+                # Generic auth error - 401
+                logger.warning(f"Authentication error: {e}")
+                return {
+                    'code': 401,
+                    'body': {
+                        'error': 'Unauthorized',
+                        'message': str(e)
+                    },
+                    'headers': {}
+                }
+            
             # Internal error
             logger.exception(f"Internal error: {e}")
             return {
@@ -152,4 +200,37 @@ class Dispatcher:
         logger.debug(f"Path parameters: {api.path_parameters}")
         
         return api
+    
+    async def _authenticate(self, api: API):
+        """
+        Execute authentication middleware
+        
+        This method loads the appropriate validator based on AUTH_STRATEGY
+        and uses the AuthMiddleware to authenticate the request.
+        
+        Args:
+            api: API instance to inject authentication data into
+        
+        Raises:
+            UnauthorizedError: If authentication fails
+            ValueError: If AUTH_STRATEGY is invalid
+        """
+        from .auth_middleware import AuthMiddleware
+        from .auth_validators import MongoAuthValidator, EnvTokenValidator
+        
+        # Choose validator based on config (default to mongo)
+        auth_strategy = os.getenv('AUTH_STRATEGY', 'mongo').lower()
+        
+        if auth_strategy == 'mongo':
+            validator = MongoAuthValidator()
+            logger.debug("Using MongoDB authentication validator")
+        elif auth_strategy == 'env':
+            validator = EnvTokenValidator()
+            logger.debug("Using environment token validator")
+        else:
+            raise ValueError(f"Unknown auth strategy: {auth_strategy}")
+        
+        # Create middleware and authenticate
+        middleware = AuthMiddleware(validator)
+        await middleware.authenticate(self.headers, api)
 

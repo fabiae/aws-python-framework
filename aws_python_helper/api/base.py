@@ -30,6 +30,11 @@ class API(ABC):
         
         # Database proxy
         self._db = None
+        
+        # Authentication properties
+        self._current_user: Optional[Dict[str, Any]] = None
+        self._auth_data: Optional[Dict[str, Any]] = None
+        self._is_authenticated: bool = False
     
     @property
     def endpoint(self) -> str:
@@ -95,6 +100,54 @@ class API(ABC):
             from ..database.database_proxy import DatabaseProxy
             self._db = DatabaseProxy(MongoManager)
         return self._db
+    
+    @property
+    def current_user(self) -> Optional[Dict[str, Any]]:
+        """
+        Current authenticated user or None if not authenticated
+        
+        This property is populated by the authentication middleware
+        when REQUIRE_AUTH=true.
+        
+        Returns:
+            Dict with user data (email, role, name, etc.) or None
+        
+        Example:
+            if self.is_authenticated:
+                user_email = self.current_user['email']
+                user_role = self.current_user.get('role', 'user')
+        """
+        return self._current_user
+    
+    @property
+    def is_authenticated(self) -> bool:
+        """
+        True if the request has been authenticated
+        
+        This is set to True by the authentication middleware
+        when a valid token is provided.
+        
+        Returns:
+            True if authenticated, False otherwise
+        
+        Example:
+            if not self.is_authenticated:
+                raise ValueError("This operation requires authentication")
+        """
+        return self._is_authenticated
+    
+    @property
+    def auth_data(self) -> Optional[Dict[str, Any]]:
+        """
+        Complete authentication data from the middleware
+        
+        This includes user data, token data, and other metadata
+        provided by the authentication validator.
+        
+        Returns:
+            Dict with authentication data or None
+        """
+        return self._auth_data
     
     def set_code(self, code: int):
         """
