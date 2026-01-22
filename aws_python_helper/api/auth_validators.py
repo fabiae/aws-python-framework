@@ -35,12 +35,12 @@ class AuthValidator(ABC):
         raise NotImplementedError("Subclasses must implement validate_token()")
 
 
-class MongoAuthValidator(AuthValidator):
+class TokenValidator(AuthValidator):
     """
-    Validates tokens against MongoDB database
+    Validates authentication tokens
     
-    This validator:
-    1. First checks if token matches AUTH_BYPASS_TOKEN (skip DB validation)
+    Simple unified validator that:
+    1. First checks if token matches AUTH_BYPASS_TOKEN (if set)
     2. If not bypass, searches token in MongoDB 'tokens' collection
     3. Validates token is not expired and is active
     4. Loads complete user data from 'users' collection
@@ -142,54 +142,4 @@ class MongoAuthValidator(AuthValidator):
             'user': user_data,
             'token_data': token_doc,
             'is_bypass': False
-        }
-
-
-class EnvTokenValidator(AuthValidator):
-    """
-    Validates tokens against an environment variable
-    
-    Simple validator that checks if token matches MASTER_API_TOKEN.
-    Useful for internal services or simple authentication needs.
-    """
-    
-    async def validate_token(self, token: str) -> Dict[str, Any]:
-        """
-        Validate token against MASTER_API_TOKEN environment variable
-        
-        Args:
-            token: The authentication token to validate
-        
-        Returns:
-            Dict with basic user information
-        
-        Raises:
-            UnauthorizedError: If token doesn't match
-        """
-        from .exceptions import UnauthorizedError
-        
-        master_token = os.getenv('MASTER_API_TOKEN')
-        
-        if not master_token:
-            raise ValueError(
-                "MASTER_API_TOKEN environment variable not set. "
-                "This is required for ENV token authentication."
-            )
-        
-        if token != master_token:
-            logger.warning("Token does not match MASTER_API_TOKEN")
-            raise UnauthorizedError("Invalid token")
-        
-        logger.info("Master API token validated successfully")
-        
-        return {
-            'user_id': 'master',
-            'user': {
-                'email': 'master@system',
-                'role': 'admin',
-                'name': 'Master User',
-                '_id': 'master'
-            },
-            'is_master': True,
-            'token_data': None
         }

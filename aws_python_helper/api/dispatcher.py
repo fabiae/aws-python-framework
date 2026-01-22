@@ -9,6 +9,9 @@ import os
 
 from .fetcher import Fetcher
 from .base import API
+from .exceptions import UnauthorizedError, ForbiddenError, AuthenticationError
+from .auth_middleware import AuthMiddleware
+from .auth_validators import TokenValidator
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +125,6 @@ class Dispatcher:
         
         except Exception as e:
             # Check if it's an authentication error
-            from .exceptions import UnauthorizedError, ForbiddenError, AuthenticationError
             
             if isinstance(e, UnauthorizedError):
                 # 401 Unauthorized
@@ -205,30 +207,18 @@ class Dispatcher:
         """
         Execute authentication middleware
         
-        This method loads the appropriate validator based on AUTH_STRATEGY
-        and uses the AuthMiddleware to authenticate the request.
+        Uses TokenValidator to validate tokens against AUTH_BYPASS_TOKEN
+        or MongoDB database.
         
         Args:
             api: API instance to inject authentication data into
         
         Raises:
             UnauthorizedError: If authentication fails
-            ValueError: If AUTH_STRATEGY is invalid
         """
-        from .auth_middleware import AuthMiddleware
-        from .auth_validators import MongoAuthValidator, EnvTokenValidator
-        
-        # Choose validator based on config (default to mongo)
-        auth_strategy = os.getenv('AUTH_STRATEGY', 'mongo').lower()
-        
-        if auth_strategy == 'mongo':
-            validator = MongoAuthValidator()
-            logger.debug("Using MongoDB authentication validator")
-        elif auth_strategy == 'env':
-            validator = EnvTokenValidator()
-            logger.debug("Using environment token validator")
-        else:
-            raise ValueError(f"Unknown auth strategy: {auth_strategy}")
+        # Use unified token validator
+        validator = TokenValidator()
+        logger.debug("Authenticating request")
         
         # Create middleware and authenticate
         middleware = AuthMiddleware(validator)
