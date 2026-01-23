@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 from .fetcher import FargateTaskFetcher
+from ..database.mongo_manager import MongoManager
 
 
 # Configure logging
@@ -50,7 +51,6 @@ def fargate_handler(task_name: str = None):
         
         # Initialize MongoDB connection
         try:
-            from ..database.mongo_manager import MongoManager
             if not MongoManager.is_initialized():
                 logger.info("Initializing MongoDB connection")
                 MongoManager.initialize()

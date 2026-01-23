@@ -7,6 +7,9 @@ from typing import Dict, Any, List
 import logging
 import json
 
+from ..database.mongo_manager import MongoManager
+from ..database.database_proxy import DatabaseProxy
+
 
 class SQSConsumer(ABC):
     """
@@ -29,8 +32,6 @@ class SQSConsumer(ABC):
             result = await self.db.users_db.users.find_one({'_id': user_id})
         """
         if self._db is None:
-            from ..database.mongo_manager import MongoManager
-            from ..database.database_proxy import DatabaseProxy
             self._db = DatabaseProxy(MongoManager)
         return self._db
     

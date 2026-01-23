@@ -6,6 +6,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any
 import logging
 
+from ..database.mongo_manager import MongoManager
+from ..database.database_proxy import DatabaseProxy
 
 class Lambda(ABC):
     """
@@ -61,8 +63,6 @@ class Lambda(ABC):
             DatabaseProxy instance for accessing MongoDB
         """
         if self._db is None:
-            from ..database.mongo_manager import MongoManager
-            from ..database.database_proxy import DatabaseProxy
             self._db = DatabaseProxy(MongoManager)
         return self._db
     

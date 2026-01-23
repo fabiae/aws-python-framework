@@ -10,6 +10,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any
 
+from ..database.mongo_manager import MongoManager
+from ..database.database_proxy import DatabaseProxy
 
 class FargateTask(ABC):
     """
@@ -56,8 +58,6 @@ class FargateTask(ABC):
             DatabaseProxy with access to MongoDB
         """
         if self._db is None:
-            from ..database.mongo_manager import MongoManager
-            from ..database.database_proxy import DatabaseProxy
             self._db = DatabaseProxy(MongoManager)
         return self._db
     

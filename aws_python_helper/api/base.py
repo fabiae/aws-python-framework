@@ -4,6 +4,8 @@ API Base Class - Base class for all REST APIs
 
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
+from ..database.mongo_manager import MongoManager
+from ..database.database_proxy import DatabaseProxy
 
 
 class API(ABC):
@@ -96,8 +98,6 @@ class API(ABC):
         Access to MongoDB databases
         """
         if self._db is None:
-            from ..database.mongo_manager import MongoManager
-            from ..database.database_proxy import DatabaseProxy
             self._db = DatabaseProxy(MongoManager)
         return self._db
     

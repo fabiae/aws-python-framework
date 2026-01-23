@@ -7,6 +7,8 @@ from typing import Dict, Any, Optional
 import os
 import logging
 from datetime import datetime
+from .exceptions import UnauthorizedError
+from ..database.mongo_manager import MongoManager
 
 logger = logging.getLogger(__name__)
 
@@ -60,8 +62,6 @@ class TokenValidator(AuthValidator):
         Raises:
             UnauthorizedError: If token is invalid or expired
         """
-        from .exceptions import UnauthorizedError
-        from ..database.mongo_manager import MongoManager
         
         # 1. Check bypass token first (for development/testing)
         bypass_token = os.getenv('AUTH_BYPASS_TOKEN')
