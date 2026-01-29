@@ -34,6 +34,8 @@ def setup_logging():
 # Llamar al inicio del módulo
 setup_logging()
 
+logger = logging.getLogger(__name__)
+
 
 def fargate_handler(task_name: str = None):
     """

@@ -30,6 +30,8 @@ def setup_logging():
 # Llamar al inicio del módulo
 setup_logging()
 
+logger = logging.getLogger(__name__)
+
 def lambda_handler(lambda_name: str) -> Callable:
     """
     Factory that returns a handler for a specific lambda

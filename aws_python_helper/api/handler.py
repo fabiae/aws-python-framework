@@ -31,6 +31,8 @@ def setup_logging():
 # Llamar al inicio del módulo
 setup_logging()
 
+logger = logging.getLogger(__name__)
+
 
 def api_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
