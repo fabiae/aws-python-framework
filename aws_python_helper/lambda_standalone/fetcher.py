@@ -6,7 +6,7 @@ import os
 import importlib.util
 from pathlib import Path
 from typing import Any, Dict
-from lambda_standalone import Lambda
+from .base import Lambda
 
 
 class LambdaFetcher:
