@@ -4,18 +4,31 @@ SQS Handler - Generic reusable handler for SQS consumers
 
 import asyncio
 import logging
+import sys
 from typing import Dict, Any, Callable
 
 from .fetcher import SQSFetcher
 from ..utils.serializer import serialize_mongo_types
 from ..database.mongo_manager import MongoManager
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+def setup_logging():
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # Solo configurar si no tiene handlers
+    if not root_logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(
+            logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        )
+        root_logger.addHandler(handler)
+    else:
+        # Si ya tiene handlers, solo actualizar el nivel
+        for handler in root_logger.handlers:
+            handler.setLevel(logging.INFO)
+
+# Llamar al inicio del módulo
+setup_logging()
 
 
 def sqs_handler(consumer_name: str) -> Callable:

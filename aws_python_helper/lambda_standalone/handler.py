@@ -4,15 +4,31 @@ Lambda Handler - Generic reusable handler for standalone Lambda functions
 
 import asyncio
 import logging
-import json
+import sys
 from typing import Dict, Any, Callable
 
 from .fetcher import LambdaFetcher
 from ..utils.serializer import serialize_mongo_types
 from ..database.mongo_manager import MongoManager
 
-logger = logging.getLogger(__name__)
+def setup_logging():
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # Solo configurar si no tiene handlers
+    if not root_logger.handlers:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setFormatter(
+            logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        )
+        root_logger.addHandler(handler)
+    else:
+        # Si ya tiene handlers, solo actualizar el nivel
+        for handler in root_logger.handlers:
+            handler.setLevel(logging.INFO)
 
+# Llamar al inicio del módulo
+setup_logging()
 
 def lambda_handler(lambda_name: str) -> Callable:
     """
