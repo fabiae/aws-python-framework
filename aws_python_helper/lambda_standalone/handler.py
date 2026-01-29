@@ -11,11 +11,6 @@ from .fetcher import LambdaFetcher
 from ..utils.serializer import serialize_mongo_types
 from ..database.mongo_manager import MongoManager
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 
@@ -58,22 +53,12 @@ def lambda_handler(lambda_name: str) -> Callable:
             {'success': False, 'error': <error_message>}
         """
 
-        print(f"Event: {json.dumps(event)}")
-        print(f"Context: {context}")
-    
-        # Log the request
-        request_id = context.aws_request_id if context else 'local'
-        logger.info(f"Lambda Handler - Request ID: {request_id}")
-        logger.info(f"Lambda: {lambda_name}")
-        logger.debug(f"Event: {event}")
-        
         # Initialize MongoDB connection (only once, reused in subsequent invocations)
         try:
             if not MongoManager.is_initialized():
-                logger.info("Initializing MongoDB connection")
                 MongoManager.initialize()
         except Exception as e:
-            logger.warning(f"MongoDB initialization skipped: {e}")
+            logger.warning(f"MongoDB initialization failed: {e}")
         
         try:
             # Load lambda class
@@ -99,7 +84,6 @@ def lambda_handler(lambda_name: str) -> Callable:
             # all MongoDB types (ObjectId, datetime, etc.) are converted first
             result = serialize_mongo_types(result)
             
-            logger.info(f"Lambda {lambda_name} executed successfully")
             return result
             
         except Exception as e:

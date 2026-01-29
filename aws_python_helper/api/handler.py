@@ -11,11 +11,6 @@ from .dispatcher import Dispatcher
 from ..utils.json_encoder import MongoJSONEncoder
 from ..database.mongo_manager import MongoManager
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 
@@ -33,22 +28,13 @@ def api_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         Response of API Gateway with statusCode, body and headers
     """
-
-    print(f"Event: {json.dumps(event)}")
-    print(f"Context: {context}")
-    
-    # Log the request
-    request_id = context.aws_request_id if context else 'local'
-    logger.info(f"Request ID: {request_id}")
-    logger.debug(f"Event: {json.dumps(event)}")
     
     # Initialize MongoDB connection (only once, reused in subsequent invocations)
     try:
         if not MongoManager.is_initialized():
-            logger.info("Initializing MongoDB connection")
             MongoManager.initialize()
     except Exception as e:
-        logger.warning(f"MongoDB initialization skipped: {e}")
+        logger.warning(f"MongoDB initialization failed: {e}")
     
     try:
         # Create dispatcher and execute
@@ -80,7 +66,6 @@ def api_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'body': json.dumps(response['body'], cls=MongoJSONEncoder, ensure_ascii=False)
         }
         
-        logger.info(f"Response: {response['code']}")
         return api_gateway_response
         
     except Exception as e:

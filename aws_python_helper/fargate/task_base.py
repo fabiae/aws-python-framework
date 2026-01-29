@@ -39,16 +39,6 @@ class FargateTask(ABC):
         self.logger = logging.getLogger(self.__class__.__name__)
         self._db = None
         
-        # Configurar logging
-        self._setup_logging()
-    
-    def _setup_logging(self):
-        """Configures logging with standard format"""
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-    
     @property
     def db(self):
         """
@@ -130,9 +120,7 @@ class FargateTask(ABC):
             True if executed successfully, False otherwise
         """
         try:
-            self.logger.info(f"Starting task: {self.__class__.__name__}")
             await self.execute()
-            self.logger.info(f"Task completed successfully: {self.__class__.__name__}")
             return True
             
         except Exception as e:

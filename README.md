@@ -274,7 +274,7 @@ lambda_client.invoke(
 
 ### Publish to SNS
 
-**1. Create your topic** in `src/topics/title_indexed.py`:
+**1. Create your topic** in `src/topic/title_indexed.py`:
 
 ```python
 from aws_python_helper.sns.publisher import SNSPublisher
@@ -286,7 +286,7 @@ class TitleIndexedTopic(SNSPublisher):
             topic_arn=os.getenv('TITLE_INDEXED_SNS_TOPIC_ARN')
         )
     
-    async def publish_indexed(self, constitution_id, title):
+    async def publish_message(self, constitution_id, title):
         await self.publish({
             'constitution_id': constitution_id,
             'title': title,
@@ -312,6 +312,7 @@ await topic.publish_indexed('123', 'My Constitution')
 from aws_python_helper.fargate.task_base import FargateTask
 
 class SearchTaxByTownTask(FargateTask):
+
     async def execute(self):
         town = self.require_env('TOWN')
         self.logger.info(f"Processing town: {town}")

@@ -5,11 +5,7 @@ Fetcher - Dynamically load API controllers based on endpoint and HTTP method
 import os
 import importlib.util
 from pathlib import Path
-from typing import List, Optional
-import logging
-
-logger = logging.getLogger(__name__)
-
+from typing import List
 
 class Fetcher:
     """
@@ -74,8 +70,6 @@ class Fetcher:
         base_path = Path(os.getcwd()) / self.API_FOLDER
         file_path = base_path / file_dir / f"{method_name}.py"
         
-        logger.debug(f"Resolved path: {file_path} for endpoint={self.endpoint}, method={self.method}")
-        
         return str(file_path)
     
     @property
@@ -114,7 +108,6 @@ class Fetcher:
         
         # Verify cache
         if file_path in self._cache:
-            logger.debug(f"Using cached controller: {file_path}")
             return self._cache[file_path]()
         
         # Verify that the file exists
@@ -150,7 +143,6 @@ class Fetcher:
         
         # Cache the class (not the instance)
         self._cache[file_path] = controller_class
-        logger.info(f"Loaded controller: {controller_class.__name__} from {file_path}")
         
         # Return new instance
         return controller_class()

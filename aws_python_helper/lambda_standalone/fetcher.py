@@ -6,9 +6,6 @@ import os
 import importlib.util
 from pathlib import Path
 from typing import Any, Dict
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 class LambdaFetcher:
@@ -55,8 +52,6 @@ class LambdaFetcher:
         base_path = Path(os.getcwd()) / self.LAMBDA_FOLDER / folder_name
         file_path = base_path / 'main.py'
         
-        logger.debug(f"Resolved lambda path: {file_path}")
-        
         return str(file_path)
     
     def get_lambda(self, event: Dict[str, Any], context: Any):
@@ -78,7 +73,6 @@ class LambdaFetcher:
         
         # Verify cache
         if file_path in self._cache:
-            logger.debug(f"Using cached lambda: {file_path}")
             return self._cache[file_path](event, context)
         
         # Verify that the file exists
@@ -120,7 +114,6 @@ class LambdaFetcher:
         
         # Cache the class
         self._cache[file_path] = lambda_class
-        logger.info(f"Loaded lambda: {lambda_class.__name__} from {file_path}")
         
         # Return new instance
         return lambda_class(event, context)

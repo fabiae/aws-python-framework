@@ -6,10 +6,6 @@ import os
 import importlib.util
 from pathlib import Path
 from typing import Dict
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 class FargateTaskFetcher:
     """
@@ -52,8 +48,6 @@ class FargateTaskFetcher:
         
         base_path = Path(os.getcwd()) / self.TASKS_FOLDER / folder_name
         file_path = base_path / 'task.py'
-        
-        logger.debug(f"Resolved task path: {file_path}")
         
         return str(file_path)
     
@@ -109,8 +103,6 @@ class FargateTaskFetcher:
                 f"Make sure your file exports a class that inherits from FargateTask\n"
                 f"Expected class name: {class_name}"
             )
-        
-        logger.info(f"Loaded task: {task_class.__name__} from {file_path}")
         
         # Return new instance with envs
         return task_class(envs=envs)

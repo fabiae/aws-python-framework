@@ -15,11 +15,6 @@ from .fetcher import FargateTaskFetcher
 from ..database.mongo_manager import MongoManager
 
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 
@@ -52,10 +47,9 @@ def fargate_handler(task_name: str = None):
         # Initialize MongoDB connection
         try:
             if not MongoManager.is_initialized():
-                logger.info("Initializing MongoDB connection")
                 MongoManager.initialize()
         except Exception as e:
-            logger.warning(f"MongoDB initialization skipped: {e}")
+            logger.warning(f"MongoDB initialization failed: {e}")
         
         # Load task
         fetcher = FargateTaskFetcher(task_name)

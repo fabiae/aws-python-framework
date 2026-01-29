@@ -2,11 +2,7 @@
 Database Proxy - Proxy to dynamically access multiple databases
 """
 
-import logging
 from typing import Any
-
-logger = logging.getLogger(__name__)
-
 
 class DatabaseProxy:
     """
@@ -43,7 +39,6 @@ class DatabaseProxy:
             raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{db_name}'")
         
         if db_name not in self._db_cache:
-            logger.debug(f"DatabaseProxy: accessing database '{db_name}'")
             self._db_cache[db_name] = self._manager.get_database(db_name)
         
         return self._db_cache[db_name]

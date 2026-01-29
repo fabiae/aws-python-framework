@@ -135,8 +135,6 @@ class TokenValidator(AuthValidator):
         user_data = dict(user)
         user_data.pop('password', None)  # Never return password
         
-        logger.info(f"Token validated successfully for user {user_data.get('email')}")
-        
         return {
             'user_id': str(token_doc['user_id']),
             'user': user_data,

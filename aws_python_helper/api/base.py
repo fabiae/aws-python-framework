@@ -3,6 +3,7 @@ API Base Class - Base class for all REST APIs
 """
 
 from abc import ABC, abstractmethod
+import logging
 from typing import Dict, Any, Optional, List
 from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
@@ -37,6 +38,7 @@ class API(ABC):
         self._current_user: Optional[Dict[str, Any]] = None
         self._auth_data: Optional[Dict[str, Any]] = None
         self._is_authenticated: bool = False
+        self.logger = logging.getLogger(self.__class__.__name__)   
     
     @property
     def endpoint(self) -> str:

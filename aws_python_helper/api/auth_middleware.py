@@ -56,19 +56,16 @@ class AuthMiddleware:
                 break
         
         if not auth_header:
-            logger.warning("Missing Authorization header")
             raise UnauthorizedError("Authorization header is required")
         
         # Check Bearer format
         if not auth_header.startswith('Bearer '):
-            logger.warning(f"Invalid Authorization header format: {auth_header[:20]}...")
             raise UnauthorizedError("Authorization header must use Bearer scheme")
         
         # Extract token
         token = auth_header.replace('Bearer ', '').strip()
         
         if not token:
-            logger.warning("Empty token in Authorization header")
             raise UnauthorizedError("Token cannot be empty")
         
         return token
@@ -89,24 +86,18 @@ class AuthMiddleware:
         Raises:
             UnauthorizedError: If authentication fails
         """
-        logger.debug("Starting authentication middleware")
         
         try:
             # 1. Extract token from headers
             token = self._extract_token(headers)
-            logger.debug("Token extracted from headers")
             
             # 2. Validate token
             auth_data = await self.validator.validate_token(token)
-            logger.debug(f"Token validated successfully for user: {auth_data.get('user', {}).get('email')}")
             
             # 3. Inject authentication data into API instance
             api._current_user = auth_data.get('user')
             api._auth_data = auth_data
             api._is_authenticated = True
-            
-            logger.info(f"Authentication successful for user: {auth_data.get('user', {}).get('email')}")
-            
         except UnauthorizedError:
             # Re-raise UnauthorizedError as is
             raise

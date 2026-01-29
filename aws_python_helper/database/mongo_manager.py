@@ -5,11 +5,7 @@ MongoDB Manager - Manager to handle connections to multiple MongoDB databases
 from motor.motor_asyncio import AsyncIOMotorClient
 from typing import Dict, Optional
 import os
-import logging
 import urllib.parse
-
-logger = logging.getLogger(__name__)
-
 
 class MongoManager:
     """
@@ -107,7 +103,6 @@ class MongoManager:
             2. MONGO_DB_HOST + MONGO_DB_USER + MONGO_DB_PASSWORD: Build from components
         """
         if cls._client is not None:
-            logger.debug("MongoManager already initialized")
             return
         
         # Try to get connection string
@@ -122,7 +117,6 @@ class MongoManager:
             options = kwargs.get('options') or os.getenv('MONGO_DB_OPTIONS')
             
             if host:
-                logger.info("Building MongoDB connection string from components")
                 conn_str = cls.build_connection_string(
                     host=host,
                     username=username,
@@ -138,10 +132,8 @@ class MongoManager:
                     "3. MONGO_DB_HOST (+ MONGO_DB_USER, MONGO_DB_PASSWORD) environment variables"
                 )
         
-        logger.info(f"Initializing MongoDB connection")
         cls._connection_string = conn_str
         cls._client = AsyncIOMotorClient(conn_str)
-        logger.info("MongoDB connection initialized successfully")
     
     @classmethod
     def get_database(cls, db_name: str):
@@ -166,7 +158,6 @@ class MongoManager:
             )
         
         if db_name not in cls._databases:
-            logger.debug(f"Creating database reference: {db_name}")
             cls._databases[db_name] = cls._client[db_name]
         
         return cls._databases[db_name]
@@ -189,7 +180,6 @@ class MongoManager:
         Useful for testing or cleanup.
         """
         if cls._client:
-            logger.info("Closing MongoDB connection")
             cls._client.close()
             cls._client = None
             cls._databases = {}
@@ -220,6 +210,5 @@ class MongoManager:
             await cls._client.admin.command('ping')
             return True
         except Exception as e:
-            logger.error(f"MongoDB ping failed: {str(e)}")
             return False
 

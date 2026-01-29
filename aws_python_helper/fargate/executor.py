@@ -63,7 +63,6 @@ class FargateExecutor:
         # ECS client
         self._ecs_client = None
         
-        logger.info(f"FargateExecutor initialized for cluster: {self.cluster}")
     
     @property
     def ecs_client(self):
@@ -123,9 +122,6 @@ class FargateExecutor:
             # Add TASK_NAME for the handler to know which task to execute
             environment.append({'name': 'TASK_NAME', 'value': task_name})
             
-            logger.info(f"Running Fargate task: {task_definition}")
-            logger.debug(f"Environment variables: {environment}")
-            
             # Execute task
             response = self.ecs_client.run_task(
                 cluster=self.cluster,
@@ -154,7 +150,6 @@ class FargateExecutor:
                 raise Exception("No tasks were started")
             
             task_arn = tasks[0]['taskArn']
-            logger.info(f"Task started successfully: {task_arn}")
             
             # Check for failures
             failures = response.get('failures', [])
@@ -194,11 +189,6 @@ class FargateExecutor:
                 logger.error(f"Error running batch task {i}: {e}")
                 task_arns.append(None)
         
-        success_count = sum(1 for arn in task_arns if arn is not None)
-        logger.info(
-            f"Batch execution complete: {success_count}/{len(envs_list)} successful"
-        )
-        
         return task_arns
     
     def get_task_status(self, task_arn: str) -> Dict[str, Any]:
@@ -232,6 +222,5 @@ class FargateExecutor:
             }
             
         except Exception as e:
-            logger.error(f"Error getting task status: {e}")
             return {'status': 'ERROR', 'error': str(e)}
 

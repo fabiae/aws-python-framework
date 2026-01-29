@@ -117,7 +117,6 @@ class SNSPublisher(ABC):
                 params['MessageAttributes'] = self._format_attributes(attributes)
             
             # Publish
-            self.logger.debug(f"Publishing message to {self.topic_arn}")
             response = self.sns_client.publish(**params)
             
             message_id = response['MessageId']

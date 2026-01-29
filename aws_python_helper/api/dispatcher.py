@@ -62,8 +62,6 @@ class Dispatcher:
             self.data = self.query_params
         else:
             self.data = self.body
-        
-        logger.info(f"Dispatcher initialized: {self.method.upper()} /{self.endpoint}")
     
     async def dispatch(self) -> Dict[str, Any]:
         """
@@ -79,24 +77,18 @@ class Dispatcher:
             # 2. Authenticate (if required)
             require_auth = os.getenv('REQUIRE_AUTH', 'false').lower() == 'true'
             if require_auth:
-                logger.debug("Authentication required, executing middleware")
                 await self._authenticate(api)
-            else:
-                logger.debug("Authentication not required, skipping middleware")
             
             # 3. Validate
-            logger.debug("Executing validate()")
             await api.validate()
             
             # 4. Process
-            logger.debug("Executing process()")
             await api.process()
             
             # 5. If no code was set, use 200 by default
             if api.response['code'] is None:
                 api.set_code(200)
             
-            logger.info(f"Request completed successfully with code {api.response['code']}")
             return api.response
             
         except FileNotFoundError as e:
@@ -184,7 +176,6 @@ class Dispatcher:
             FileNotFoundError: If the controller is not found
             ValueError: If the controller is not valid
         """
-        logger.debug(f"Preparing controller for {self.endpoint}")
         
         # Create fetcher and get controller
         fetcher = Fetcher(self.endpoint, self.method)
@@ -197,9 +188,6 @@ class Dispatcher:
         api.headers = self.headers
         api.path_parameters = fetcher.path_parameters
         api.query_parameters = self.query_params
-        
-        logger.debug(f"Controller prepared: {api.__class__.__name__}")
-        logger.debug(f"Path parameters: {api.path_parameters}")
         
         return api
     
@@ -218,7 +206,6 @@ class Dispatcher:
         """
         # Use unified token validator
         validator = TokenValidator()
-        logger.debug("Authenticating request")
         
         # Create middleware and authenticate
         middleware = AuthMiddleware(validator)

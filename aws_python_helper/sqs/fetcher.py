@@ -5,10 +5,6 @@ SQS Fetcher - Dynamically load consumers based on name
 import os
 import importlib.util
 from pathlib import Path
-import logging
-
-logger = logging.getLogger(__name__)
-
 
 class SQSFetcher:
     """
@@ -52,8 +48,6 @@ class SQSFetcher:
         base_path = Path(os.getcwd()) / self.CONSUMERS_FOLDER
         file_path = base_path / file_name
         
-        logger.debug(f"Resolved consumer path: {file_path}")
-        
         return str(file_path)
     
     def get_consumer(self):
@@ -71,7 +65,6 @@ class SQSFetcher:
         
         # Verify cache
         if file_path in self._cache:
-            logger.debug(f"Using cached consumer: {file_path}")
             return self._cache[file_path]()
         
         # Verify that the file exists
@@ -113,7 +106,6 @@ class SQSFetcher:
         
         # Cache the class
         self._cache[file_path] = consumer_class
-        logger.info(f"Loaded consumer: {consumer_class.__name__} from {file_path}")
         
         # Return new instance
         return consumer_class()

@@ -121,15 +121,11 @@ class Lambda(ABC):
             Exception: Any error during validation or processing
         """
         try:
-            self.logger.info(f"Starting Lambda execution: {self.__class__.__name__}")
             
             # Step 1: Validate
             await self.validate()
-            self.logger.debug("Validation passed")
-            
             # Step 2: Process
             result = await self.process()
-            self.logger.info(f"Lambda execution completed successfully")
             
             # Step 3: Return result
             return {
