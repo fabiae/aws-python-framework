@@ -6,6 +6,7 @@ import os
 import importlib.util
 from pathlib import Path
 from typing import Any, Dict
+from lambda_standalone import Lambda
 
 
 class LambdaFetcher:
@@ -100,7 +101,7 @@ class LambdaFetcher:
         for item_name in dir(module):
             item = getattr(module, item_name)
             if (isinstance(item, type) and 
-                hasattr(item, 'process') and 
+                issubclass(item, Lambda) and 
                 item.__name__ not in ['Lambda', 'ABC']):
                 lambda_class = item
                 break
