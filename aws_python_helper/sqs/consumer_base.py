@@ -25,9 +25,10 @@ class SQSConsumer(ABC):
         Both modes support controlled retry via AWS SQS reportBatchItemFailures:
         - "single" mode: If process_record() raises an exception, that message
           is automatically reported for retry. Other messages continue processing.
-        - "batch" mode: Return results with 'success': False and 'itemIdentifier'
-          for failed messages. The handler will automatically create reportBatchItemFailures
-          so AWS SQS retries only those specific messages.
+        - "batch" mode: Use add_message_failed() to mark failed messages.
+          The handler will automatically create reportBatchItemFailures so AWS SQS
+          retries only those specific messages. Your _do_process_batch() is automatically
+          wrapped with error handling.
         
         This ensures that if 1 message fails out of 5, only that 1 message is retried,
         not the entire batch.
@@ -58,37 +59,26 @@ class SQSConsumer(ABC):
             
             async def process_batch(self, records):
                 # Process all records together
-                # Must return a list of results with format:
-                # [{'messageId': '...', 'success': True/False, 'error': '...', 'itemIdentifier': '...'}, ...]
-                # 
-                # IMPORTANT: For failed messages, include 'itemIdentifier' so AWS SQS
-                # can retry only those specific messages. The handler will automatically
-                # create reportBatchItemFailures for you.
-                results = []
+                # Use add_message_failed() to mark failed messages - no need for try-except!
+                # The base class wraps this method with error handling automatically
                 for record in records:
-                    message_id = record.get('messageId', 'unknown')
+                    message_id = record.get('messageId')
                     try:
                         # Your batch processing logic here
                         # Process all records together (bulk operations, transactions, etc.)
-                        results.append({
-                            'messageId': message_id,
-                            'success': True
-                        })
+                        await self.process_message(record)
                     except Exception as e:
-                        # Failed message - include itemIdentifier for controlled retry
-                        results.append({
-                            'messageId': message_id,
-                            'success': False,
-                            'error': str(e),
-                            'itemIdentifier': message_id  # Required for reportBatchItemFailures
-                        })
-                return results
+                        # Mark as failed - automatically handled by base class
+                        self.add_message_failed(message_id, str(e))
+                # No need to return results - base class handles it automatically
+                # But you can return results if you want more control
     """
     
     def __init__(self):
         """Initialize the consumer with a logger"""
         self.logger = logging.getLogger(self.__class__.__name__)
         self._db = None
+        self._failed_messages = []  # Track failed messages for batch mode
     
     @property
     def processing_mode(self) -> str:
@@ -161,47 +151,157 @@ class SQSConsumer(ABC):
         
         return body
     
-    async def process_batch(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def add_message_failed(self, message_id: str, error: str = None):
         """
-        Process a batch of SQS records
+        Mark a message as failed (for batch mode)
         
-        This method behavior depends on processing_mode:
-        - "single": Processes records one by one using process_record() (default implementation)
-        - "batch": Must be overridden to process all records together
+        Use this method in your process_batch() implementation to mark messages
+        that failed during batch processing. The handler will automatically
+        create reportBatchItemFailures for these messages.
+        
+        Args:
+            message_id: The messageId of the failed message
+            error: Optional error message describing the failure
+        
+        Usage:
+            async def process_batch(self, records):
+                for record in records:
+                    message_id = record.get('messageId')
+                    try:
+                        # Your processing logic
+                        process_message(record)
+                    except Exception as e:
+                        # Mark as failed - no need to manually add to results
+                        self.add_message_failed(message_id, str(e))
+        """
+        self._failed_messages.append({
+            'messageId': message_id,
+            'itemIdentifier': message_id,
+            'error': error
+        })
+        if error:
+            self.logger.error(f"Message {message_id} marked as failed: {error}")
+        else:
+            self.logger.error(f"Message {message_id} marked as failed")
+    
+    async def _process_batch_internal(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Internal method called by the handler to process a batch of SQS records
+        
+        This method routes to the appropriate processing based on processing_mode:
+        - "single": Processes records one by one using process_record()
+        - "batch": Wraps the user's process_batch() implementation with error handling
         
         Args:
             records: List of SQS records
         
         Returns:
-            List of results with success/error for each record.
-            Format for each result:
-            {
-                'messageId': str,           # Required: message ID
-                'success': bool,             # Required: True if successful, False if failed
-                'error': str,                # Optional: error message if failed
-                'itemIdentifier': str        # Required if failed: messageId for reportBatchItemFailures
-            }
-        
-        Note:
-            When processing_mode is "batch", you must override this method completely.
-            When processing_mode is "single", implement process_record() instead.
-            
-            For failed messages in batch mode, include 'itemIdentifier' in the result
-            to enable controlled retry via reportBatchItemFailures. The handler will
-            automatically create the reportBatchItemFailures response for you.
+            List of results with success/error for each record
         """
         mode = self.processing_mode
         
         if mode == "batch":
-            # In batch mode, this method must be overridden
-            # If we reach here, it means the method wasn't overridden
-            raise NotImplementedError(
-                f"When processing_mode is 'batch', you must override process_batch() method. "
-                f"The base implementation only supports 'single' mode."
-            )
+            # Reset failed messages list for this batch
+            self._failed_messages = []
+            # Wrap batch processing with error handling
+            return await self._process_batch_wrapper(records)
         else:
             # Single mode: process records one by one using process_record()
             return await self._process_batch_single(records)
+    
+    async def process_batch(self, records: List[Dict[str, Any]]) -> None:
+        """
+        Process a batch of SQS records (to be overridden by user in batch mode)
+        
+        When processing_mode is "batch", override this method to implement
+        your batch processing logic. Use add_message_failed() to mark failed messages.
+        The base class will wrap your implementation with error handling automatically.
+        
+        This method should not return any value. Simply process the records and use
+        add_message_failed() to mark any messages that fail. All other messages will
+        be automatically marked as successful.
+        
+        Args:
+            records: List of SQS records
+        
+        Example:
+            async def process_batch(self, records):
+                for record in records:
+                    message_id = record.get('messageId')
+                    try:
+                        # Your processing logic
+                        await self.process_message(record)
+                    except Exception as e:
+                        # Mark as failed - automatically handled
+                        self.add_message_failed(message_id, str(e))
+        """
+        # Base implementation - should be overridden by user when processing_mode is "batch"
+        # This method is only called when processing_mode is "batch"
+        # If not overridden, all messages will be marked as successful
+        # (unless marked as failed via add_message_failed)
+        if self.processing_mode == "batch":
+            raise NotImplementedError(
+                f"You must implement process_batch() when processing_mode is 'batch'"
+            )
+    
+    async def _process_batch_wrapper(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Wrapper for batch mode processing with automatic error handling
+        
+        This method wraps the user's process_batch() implementation with try-except
+        to catch any unhandled exceptions. It also merges failed messages marked
+        with add_message_failed() into the results.
+        
+        Internal method used when processing_mode is "batch"
+        """
+        # Get all message IDs upfront
+        message_ids = [record.get('messageId', f'record-{i}') for i, record in enumerate(records)]
+        results = []
+        
+        try:
+            # Call the user's process_batch implementation (no return value expected)
+            await self.process_batch(records)
+            
+            # Build results based on _failed_messages
+            # All messages are successful by default, except those marked as failed
+            for message_id in message_ids:
+                # Check if this message was marked as failed
+                failed_msg = next((fm for fm in self._failed_messages if fm['messageId'] == message_id), None)
+                if failed_msg:
+                    # Message was marked as failed
+                    results.append({
+                        'messageId': message_id,
+                        'success': False,
+                        'error': failed_msg.get('error'),
+                        'itemIdentifier': failed_msg['itemIdentifier']
+                    })
+                else:
+                    # Message was successful
+                    results.append({
+                        'messageId': message_id,
+                        'success': True
+                    })
+            
+        except Exception as e:
+            # If the entire batch processing fails, mark all messages as failed
+            self.logger.exception(f"Unhandled exception in process_batch: {e}")
+            for message_id in message_ids:
+                results.append({
+                    'messageId': message_id,
+                    'success': False,
+                    'error': str(e),
+                    'itemIdentifier': message_id
+                })
+        
+        # Log summary
+        success_count = sum(1 for r in results if r.get('success', False))
+        failed_count = len(results) - success_count
+        self.logger.info(
+            f"Batch processing complete: {success_count} successful, {failed_count} failed"
+        )
+        
+        return results
+    
     
     async def _process_batch_single(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """

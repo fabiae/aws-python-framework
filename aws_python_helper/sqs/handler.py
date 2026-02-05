@@ -85,7 +85,7 @@ def sqs_handler(consumer_name: str) -> Callable:
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
             
-            results = loop.run_until_complete(consumer.process_batch(records))
+            results = loop.run_until_complete(consumer._process_batch_internal(records))
             
             # Count successes and failures
             success_count = sum(1 for r in results if r['success'])
