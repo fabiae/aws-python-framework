@@ -80,7 +80,7 @@ class TokenValidator(AuthValidator):
             }
         
         # 2. Get database name from environment
-        db_name = os.getenv('AUTH_DB_NAME')
+        db_name = os.getenv('AUTH_DB_NAME') or 'core'
         if not db_name:
             raise ValueError(
                 "AUTH_DB_NAME environment variable not set. "
