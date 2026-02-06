@@ -43,7 +43,7 @@ class SQSFetcher:
             Absolute path to the consumer file
         """
         # Convert dashes to underscores for Python file name
-        file_name = self.consumer_name.replace('-', '_') + '.py'
+        file_name = self.consumer_name.replace('-', '_') + '_consumer.py'
         
         base_path = Path(os.getcwd()) / self.CONSUMERS_FOLDER
         file_path = base_path / file_name
@@ -71,7 +71,7 @@ class SQSFetcher:
         if not os.path.exists(file_path):
             raise FileNotFoundError(
                 f"Consumer not found: {file_path}\n"
-                f"Expected file for consumer '{self.consumer_name}' at {self.CONSUMERS_FOLDER}/{self.consumer_name.replace('-', '_')}.py"
+                f"Expected file for consumer '{self.consumer_name}' at {file_path}"
             )
         
         # Load module dynamically
