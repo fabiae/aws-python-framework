@@ -57,16 +57,26 @@ class SNSPublisher(ABC):
     async def publish(
         self,
         message: Union[Dict[str, Any], List[Dict[str, Any]]],
-        attributes: Optional[Dict[str, str]] = None,
-        subject: Optional[str] = None
     ) -> Union[str, List[str]]:
         """
         Publishes one or more messages to the topic
         
         Args:
-            message: Message or list of messages (dicts serializable to JSON)
-            attributes: Optional message attributes (only strings)
-            subject: Subject of the message (optional, useful for emails)
+            message: Message or list of messages (dicts serializable to JSON) with at least a 'content' key containing
+                the message body to send.
+                Optionally, it can include:
+                    - 'attributes': a dict with SNS message attributes
+                    - 'subject': an optional subject string
+                Example:
+                    message = {
+                        "content": {...},              # The message body that will be published
+                        "attributes": {...},          # (Optional) SNS message attributes
+                        "subject": "Optional subject" # (Optional) Subject for the message
+                    }
+                If you just want to send a body, use at least: {"content": ...}
+                The 'content' key is required.
+                If the message is a list, each item must have a 'content' key.
+                The 'attributes' and 'subject' keys are optional.
         
         Returns:
             Message ID or list of message IDs
@@ -77,35 +87,49 @@ class SNSPublisher(ABC):
         """
         # Determine if it is batch or simple
         if isinstance(message, list):
-            return await self._publish_batch(message, attributes, subject)
+            return await self._publish_batch(message)
         else:
-            return await self._publish_single(message, attributes, subject)
+            return await self._publish_single(message)
     
     async def _publish_single(
         self,
-        message: Dict[str, Any],
-        attributes: Optional[Dict[str, str]] = None,
-        subject: Optional[str] = None
+        message: Dict[str, Any]
     ) -> str:
         """
         Publishes a single message
         
         Args:
-            message: Message to publish
-            attributes: Message attributes
-            subject: Subject of the message
+            message: Message to publish with at least a 'content' key containing the message body to send.
+                Optionally, it can include:
+                    - 'attributes': a dict with SNS message attributes
+                    - 'subject': an optional subject string
+                Example:
+                    message = {
+                        "content": {...},              # The message body that will be published
+                        "attributes": {...},          # (Optional) SNS message attributes
+                        "subject": "Optional subject" # (Optional) Subject for the message
+                    }
+                If you just want to send a body, use at least: {"content": ...}
+                The 'content' key is required.
+                The 'attributes' and 'subject' keys are optional.
         
         Returns:
             Message ID
         """
         try:
             # Serialize message
-            message_body = self._serialize_message(message)
+            content = message.get("content")
+            if not content:
+                raise ValueError("Message content is required")
+            
+            content = self._serialize_message(content)
+            attributes = message.get("attributes")
+            subject = message.get("subject")
             
             # Prepare parameters
             params = {
                 'TopicArn': self.topic_arn,
-                'Message': message_body
+                'Message': content
             }
             
             # Add subject if exists
@@ -130,17 +154,29 @@ class SNSPublisher(ABC):
     
     async def _publish_batch(
         self,
-        messages: List[Dict[str, Any]],
-        attributes: Optional[Dict[str, str]] = None,
-        subject: Optional[str] = None
+        messages: List[Dict[str, Any]]
     ) -> List[str]:
         """
         Publishes multiple messages (one by one, SNS does not have native batch)
         
         Args:
             messages: List of messages to publish
-            attributes: Message attributes (applied to all)
-            subject: Subject (applied to all)
+                Each message must have at least a 'content' key containing the message body to send.
+                Optionally, it can include:
+                    - 'attributes': a dict with SNS message attributes
+                    - 'subject': an optional subject string
+                Example:
+                    messages = [
+                        {
+                            "content": {...},              # The message body that will be published
+                            "attributes": {...},          # (Optional) SNS message attributes
+                            "subject": "Optional subject" # (Optional) Subject for the message
+                        }
+                    ]
+                If you just want to send a body, use at least: {"content": ...}
+                The 'content' key is required.
+                The 'attributes' and 'subject' keys are optional.
+                If the message is a list, each item must have a 'content' key.
         
         Returns:
             List of message IDs
@@ -149,7 +185,7 @@ class SNSPublisher(ABC):
         
         for i, message in enumerate(messages):
             try:
-                message_id = await self._publish_single(message, attributes, subject)
+                message_id = await self._publish_single(message)
                 message_ids.append(message_id)
             except Exception as e:
                 self.logger.error(f"Error publishing message {i} in batch: {e}")
@@ -163,22 +199,22 @@ class SNSPublisher(ABC):
         
         return message_ids
     
-    def _serialize_message(self, message: Dict[str, Any]) -> str:
+    def _serialize_message(self, content: Dict[str, Any]) -> str:
         """
         Serializes the message to JSON
         
         Args:
-            message: Message to serialize
+            content: Content to serialize
         
         Returns:
             String JSON
         
         Raises:
-            ValueError: If the message is not serializable
+            ValueError: If the content is not serializable
         """
         try:
             from ..utils.json_encoder import MongoJSONEncoder
-            return json.dumps(message, cls=MongoJSONEncoder, ensure_ascii=False)
+            return json.dumps(content, cls=MongoJSONEncoder, ensure_ascii=False)
         except (TypeError, ValueError) as e:
             raise ValueError(f"Message is not JSON serializable: {e}")
     
