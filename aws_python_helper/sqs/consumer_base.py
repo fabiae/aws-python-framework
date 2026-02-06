@@ -163,26 +163,59 @@ class SQSConsumer(ABC):
             )
         # In batch mode, this method is optional
     
-    def parse_body(self, record: Dict[str, Any]) -> Dict[str, Any]:
+    def extract_content_message(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """
         Parse the body of the SQS message
         
+        When SNS sends messages to SQS, the body has this structure:
+        {
+            "Type": "Notification",
+            "Message": "{...the actual message serialized as JSON string...}",
+            "MessageAttributes": {...}
+        }
+        
+        This method automatically detects SNS messages and extracts the actual content
+        from the "Message" field. If it's not an SNS message, it parses the body directly.
+        
         Args:
-            record: SQS record
+            record: SQS record with 'body' field
         
         Returns:
-            Parsed body as dict
+            Parsed body as dict. For SNS messages, returns the parsed content from the "Message" field.
+            For regular SQS messages, returns the parsed body directly.
         """
         body = record.get('body', '{}')
         
+        # Parse the body string to JSON if needed
         if isinstance(body, str):
             try:
-                return json.loads(body)
+                body_json = json.loads(body)
             except json.JSONDecodeError:
                 self.logger.warning(f"Could not parse body as JSON: {body}")
                 return {'raw': body}
+        else:
+            body_json = body
         
-        return body
+        # Check if this is an SNS notification message
+        if isinstance(body_json, dict) and body_json.get('Type') == 'Notification':
+            # Extract the actual message from the "Message" field
+            message_str = body_json.get('Message', '{}')
+            
+            if isinstance(message_str, str):
+                try:
+                    # Parse the JSON string in the Message field
+                    message_content = json.loads(message_str)
+                    self.logger.debug(f"Extracted SNS message content: {message_content}")
+                    return message_content
+                except json.JSONDecodeError:
+                    self.logger.warning(f"Could not parse SNS Message field as JSON: {message_str}")
+                    return {'raw': message_str, 'sns_notification': True}
+            else:
+                # Message field is already a dict
+                return message_str
+        
+        # Not an SNS message, return the body as-is
+        return body_json
     
     def add_message_failed(self, message_id: str, error: str = None):
         """
