@@ -9,6 +9,8 @@ import json
 
 from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
+from ..database.external_mongo_manager import ExternalMongoManager
+from ..database.external_database_proxy import ExternalDatabaseProxy
 
 
 class SQSConsumer(ABC):
@@ -78,6 +80,7 @@ class SQSConsumer(ABC):
         """Initialize the consumer with a logger"""
         self.logger = logging.getLogger(self.__class__.__name__)
         self._db = None
+        self._external_db = None
         self._failed_messages = []  # Track failed messages for batch mode
     
     @property
@@ -96,7 +99,7 @@ class SQSConsumer(ABC):
     @property
     def db(self):
         """
-        Access to MongoDB databases
+        Access to MongoDB databases (main cluster)
         
         Usage:
             result = await self.db.users_db.users.find_one({'_id': user_id})
@@ -104,6 +107,36 @@ class SQSConsumer(ABC):
         if self._db is None:
             self._db = DatabaseProxy(MongoManager)
         return self._db
+    
+    @property
+    def external_db(self):
+        """
+        Access to external MongoDB clusters
+        
+        Returns None if EXTERNAL_MONGODB_CONNECTIONS environment variable is not set.
+        
+        Usage:
+            if self.external_db:
+                result = await self.external_db.ClusterDockets.smart_data.addresses.find_one({...})
+                await self.external_db.ClusterDockets.core.users.insert_one({...})
+        
+        Returns:
+            ExternalDatabaseProxy instance for accessing external clusters, or None if not configured
+        """
+        if self._external_db is None:
+            # Initialize external connections if not already done
+            if not ExternalMongoManager.is_initialized():
+                has_connections = ExternalMongoManager.initialize()
+                if not has_connections:
+                    # No external connections available, return None
+                    return None
+            else:
+                # Check if there are any connections available
+                if len(ExternalMongoManager.get_available_clusters()) == 0:
+                    return None
+            
+            self._external_db = ExternalDatabaseProxy()
+        return self._external_db
     
     async def process_record(self, record: Dict[str, Any]):
         """

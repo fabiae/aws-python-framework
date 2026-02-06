@@ -12,6 +12,8 @@ from typing import Dict, Any
 
 from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
+from ..database.external_mongo_manager import ExternalMongoManager
+from ..database.external_database_proxy import ExternalDatabaseProxy
 
 class FargateTask(ABC):
     """
@@ -38,11 +40,12 @@ class FargateTask(ABC):
         self.envs = envs or {}
         self.logger = logging.getLogger(self.__class__.__name__)
         self._db = None
+        self._external_db = None
         
     @property
     def db(self):
         """
-        Access to MongoDB databases
+        Access to MongoDB databases (main cluster)
         
         Returns:
             DatabaseProxy with access to MongoDB
@@ -50,6 +53,36 @@ class FargateTask(ABC):
         if self._db is None:
             self._db = DatabaseProxy(MongoManager)
         return self._db
+    
+    @property
+    def external_db(self):
+        """
+        Access to external MongoDB clusters
+        
+        Returns None if EXTERNAL_MONGODB_CONNECTIONS environment variable is not set.
+        
+        Usage:
+            if self.external_db:
+                result = await self.external_db.ClusterDockets.smart_data.addresses.find_one({...})
+                await self.external_db.ClusterDockets.core.users.insert_one({...})
+        
+        Returns:
+            ExternalDatabaseProxy instance for accessing external clusters, or None if not configured
+        """
+        if self._external_db is None:
+            # Initialize external connections if not already done
+            if not ExternalMongoManager.is_initialized():
+                has_connections = ExternalMongoManager.initialize()
+                if not has_connections:
+                    # No external connections available, return None
+                    return None
+            else:
+                # Check if there are any connections available
+                if len(ExternalMongoManager.get_available_clusters()) == 0:
+                    return None
+            
+            self._external_db = ExternalDatabaseProxy()
+        return self._external_db
     
     def get_env(self, key: str, default: Any = None) -> str:
         """
