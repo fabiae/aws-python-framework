@@ -26,7 +26,6 @@ class FargateExecutor:
         self,
         cluster: str = None,
         subnets: List[str] = None,
-        assign_public_ip: str = None,
         region: str = None
     ):
         """
@@ -39,7 +38,10 @@ class FargateExecutor:
             region: AWS region (default: from AWS_REGION or us-east-2)
         """
         # Configuration
-        self.cluster = cluster or os.getenv('ECS_CLUSTER', 'DevDockets')
+        self.cluster = cluster or os.getenv('ECS_CLUSTER')
+
+        if not self.cluster:
+            raise ValueError("ECS_CLUSTER environment variable is required")
         
         # Subnets: accept list or string separated by commas
         if subnets:
@@ -50,15 +52,12 @@ class FargateExecutor:
         
         # If no subnets are configured, use the default ones
         if not self.subnets:
-            self.subnets = [
-                'subnet-0014a556ff4b9ad25',
-                'subnet-0f3a12222df52ddc0',
-                'subnet-0d271a90b055826cd',
-                'subnet-05bdb3178e6dadef0'
-            ]
+            raise ValueError("ECS_SUBNETS environment variable is required")
         
-        self.assign_public_ip = assign_public_ip or os.getenv('ECS_ASSIGN_PUBLIC_IP', 'ENABLED')
-        self.region = region or os.getenv('AWS_REGION', 'us-east-2')
+        self.region = region or os.getenv('AWS_REGION')
+
+        if not self.region:
+            raise ValueError("AWS_REGION environment variable is required")
         
         # ECS client
         self._ecs_client = None
@@ -83,7 +82,8 @@ class FargateExecutor:
         container_name: str = None,
         task_definition_revision: int = None,
         count: int = 1,
-        launch_type: str = 'FARGATE'
+        launch_type: str = 'FARGATE',
+        assign_public_ip: str = 'ENABLED'
     ) -> str:
         """
         Executes a Fargate task
@@ -131,7 +131,7 @@ class FargateExecutor:
                 networkConfiguration={
                     'awsvpcConfiguration': {
                         'subnets': self.subnets,
-                        'assignPublicIp': self.assign_public_ip
+                        'assignPublicIp': assign_public_ip
                     }
                 },
                 overrides={
