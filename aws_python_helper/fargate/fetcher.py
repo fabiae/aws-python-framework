@@ -3,6 +3,7 @@ Fargate Task Fetcher - Dynamically load Fargate tasks based on name
 """
 
 import os
+import sys
 import importlib.util
 from pathlib import Path
 from typing import Dict
@@ -73,6 +74,12 @@ class FargateTaskFetcher:
                 f"Task not found: {file_path}\n"
                 f"Expected file for task '{self.task_name}' at {self.TASKS_FOLDER}/{self.task_name}/task.py"
             )
+        
+        # Agregar el directorio src al sys.path para importaciones absolutas
+        # Esto permite que los tasks importen desde repositories, helpers, etc.
+        src_dir = Path(os.getcwd())
+        if str(src_dir) not in sys.path:
+            sys.path.insert(0, str(src_dir))
         
         # Load module dynamically
         spec = importlib.util.spec_from_file_location("task_module", file_path)
