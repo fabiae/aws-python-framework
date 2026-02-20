@@ -181,6 +181,8 @@ class SNSPublisher(ABC):
                 # Continue with the other messages
                 continue
 
+        params['PublishBatchRequestEntries'] = message_to_publish
+
         result = self.sns_client.publish_batch(**params)
 
         for message in result['Successful']:
