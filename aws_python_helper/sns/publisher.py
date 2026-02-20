@@ -257,7 +257,7 @@ class SNSPublisher(ABC):
         subject = message.get("subject")
 
         params = {
-            'Id': index,
+            'Id': str(index),
             'Message': content
         }
         
