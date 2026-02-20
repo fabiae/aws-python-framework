@@ -175,7 +175,7 @@ class SNSPublisher(ABC):
         
         for i, message in enumerate(messages):
             try:
-                message_to_publish.append(self._format_message(message))
+                message_to_publish.append(self._format_message(message, i))
             except Exception as e:
                 self.logger.error(f"Error publishing message {i} in batch: {e}")
                 # Continue with the other messages
@@ -238,7 +238,7 @@ class SNSPublisher(ABC):
         
         return formatted
     
-    def _format_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+    def _format_message(self, message: Dict[str, Any], index: int) -> Dict[str, Any]:
         """
         Formats the message for SNS
         
@@ -257,6 +257,7 @@ class SNSPublisher(ABC):
         subject = message.get("subject")
 
         params = {
+            'Id': index,
             'Message': content
         }
         
