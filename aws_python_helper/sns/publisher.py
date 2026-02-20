@@ -117,29 +117,13 @@ class SNSPublisher(ABC):
             Message ID
         """
         try:
-            # Serialize message
-            content = message.get("content")
-            if not content:
-                raise ValueError("Message content is required")
-            
-            content = self._serialize_message(content)
-            attributes = message.get("attributes")
-            subject = message.get("subject")
             
             # Prepare parameters
             params = {
                 'TopicArn': self.topic_arn,
-                'Message': content
+                **self._format_message(message)
             }
-            
-            # Add subject if exists
-            if subject:
-                params['Subject'] = subject
-            
-            # Add message attributes if exist
-            if attributes:
-                params['MessageAttributes'] = self._format_attributes(attributes)
-            
+
             # Publish
             response = self.sns_client.publish(**params)
             
@@ -181,23 +165,31 @@ class SNSPublisher(ABC):
         Returns:
             List of message IDs
         """
-        message_ids = []
+        message_to_publish = []
+        message_ids_success = []
+        message_ids_failed = []
+
+        params = {
+            'TopicArn': self.topic_arn
+        }
         
         for i, message in enumerate(messages):
             try:
-                message_id = await self._publish_single(message)
-                message_ids.append(message_id)
+                message_to_publish.append(self._format_message(message))
             except Exception as e:
                 self.logger.error(f"Error publishing message {i} in batch: {e}")
                 # Continue with the other messages
-                message_ids.append(None)
+                continue
+
+        result = self.sns_client.publish_batch(**params)
+
+        for message in result['Successful']:
+            message_ids_success.append(message['MessageId'])
+
+        for message in result['Failed']:
+            message_ids_failed.append(None)
         
-        success_count = sum(1 for mid in message_ids if mid is not None)
-        self.logger.info(
-            f"Batch publish complete: {success_count}/{len(messages)} successful"
-        )
-        
-        return message_ids
+        return message_ids_success, message_ids_failed
     
     def _serialize_message(self, content: Dict[str, Any]) -> str:
         """
@@ -243,3 +235,35 @@ class SNSPublisher(ABC):
             }
         
         return formatted
+    
+    def _format_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Formats the message for SNS
+        
+        Args:
+            message: Message to format
+        
+        Returns:
+            Formatted message
+        """
+        content = message.get("content")
+        if not content:
+            raise ValueError("Message content is required")
+        
+        content = self._serialize_message(content)
+        attributes = message.get("attributes")
+        subject = message.get("subject")
+
+        params = {
+            'Message': content
+        }
+        
+        # Add subject if exists
+        if subject:
+            params['Subject'] = subject
+        
+        # Add message attributes if exist
+        if attributes:
+            params['MessageAttributes'] = self._format_attributes(attributes)
+
+        return params
