@@ -2,6 +2,7 @@
 SQS Consumer Base - Base class for all SQS consumers
 """
 
+import os
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List
 import logging
@@ -137,6 +138,18 @@ class SQSConsumer(ABC):
             
             self._external_db = ExternalDatabaseProxy()
         return self._external_db
+    
+    def get_queue_url(self) -> str:
+        """
+        Get the URL of the SQS queue
+        
+        Returns:
+            The URL of the SQS queue
+        """
+
+        base_url = f"https://sqs.{os.getenv('AWS_REGION')}.amazonaws.com/{os.getenv('AWS_ACCOUNT_ID')}"
+        queue_name = f"{os.getenv('SERVICE_NAME')}{os.getenv('QUEUE_NAME')}-{os.getenv('ENV')}"
+        return f"{base_url}/{queue_name}"
     
     async def process_record(self, record: Dict[str, Any]):
         """
