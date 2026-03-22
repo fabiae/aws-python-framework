@@ -8,22 +8,43 @@ Mini-framework to create REST APIs, SQS Consumers, SNS Publishers, Fargate Tasks
 - **Dynamic controller loading**: Routing based on convention
 - **OOP structure**: Object-oriented programming for your code
 - **Flexible MongoDB**: Direct access to multiple databases without models
-- **SQS Consumers**: Same pattern to process SQS messages
+- **External MongoDB**: Connect to multiple MongoDB clusters simultaneously
+- **SQS Consumers**: Same pattern to process SQS messages (single or batch mode)
 - **SNS Publishers**: Same pattern to publish messages to SNS topics
 - **Fargate Tasks**: Same pattern to run tasks in Fargate containers
 - **Standalone Lambdas**: Create lambdas invocable directly with AWS SDK
+- **Authentication middleware**: Built-in token-based authentication
+- **JSON utilities**: Automatic serialization of MongoDB types
 - **Type hints**: Modern Python with type annotations
 - **Async/await**: Full support for asynchronous operations
 
 ## 🔧 Installation
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Configure MongoDB URI
-export MONGODB_URI="mongodb://localhost:27017"
+pip install aws-python-helper
 ```
+
+## 📦 Quick Reference
+
+All available classes and functions:
+
+| Class / Function | Import | Purpose |
+|------------------|--------|---------|
+| `API` | `aws_python_helper.api.base` | Base class for REST endpoints |
+| `api_handler` | `aws_python_helper.api.handler` | Generic handler for API Gateway |
+| `SQSConsumer` | `aws_python_helper.sqs.consumer_base` | Base class for SQS consumers |
+| `sqs_handler` | `aws_python_helper.sqs.handler` | Factory handler for SQS |
+| `SNSPublisher` | `aws_python_helper.sns.publisher` | Base class for SNS publishers |
+| `Lambda` | `aws_python_helper.lambda_standalone.base` | Base class for Standalone Lambdas |
+| `lambda_handler` | `aws_python_helper.lambda_standalone.handler` | Factory handler for Lambda |
+| `FargateTask` | `aws_python_helper.fargate.task_base` | Base class for Fargate tasks |
+| `FargateExecutor` | `aws_python_helper.fargate.executor` | Launches Fargate tasks from Lambda |
+| `fargate_handler` | `aws_python_helper.fargate.handler` | Entry point handler for Fargate |
+| `MongoJSONEncoder` | `aws_python_helper.utils.json_encoder` | JSON encoder for MongoDB types |
+| `mongo_json_dumps` | `aws_python_helper.utils.json_encoder` | Helper to serialize MongoDB types |
+| `serialize_mongo_types` | `aws_python_helper.utils.serializer` | Recursively serialize MongoDB types |
+| `UnauthorizedError` | `aws_python_helper.api.exceptions` | 401 authentication exception |
+| `ForbiddenError` | `aws_python_helper.api.exceptions` | 403 authorization exception |
 
 ## 📂 Project Structure
 
@@ -53,13 +74,16 @@ your-project/
     │   └── process-payment/           # process-payment -> ProcessPaymentLambda
     │       └── main.py
     │
-    └── task/                         # Fargate Tasks (folders)
-        ├── search-tax-by-town/        # search-tax-by-town -> SearchTaxByTownTask
-        │   ├── main.py                # Entry point
-        │   └── task.py                # Task class
-        └── process-data/              # process-data -> ProcessDataTask
-            ├── main.py
-            └── task.py
+    ├── task/                         # Fargate Tasks (folders)
+    │   ├── search-tax-by-town/        # search-tax-by-town -> SearchTaxByTownTask
+    │   │   ├── main.py                # Entry point
+    │   │   └── task.py                # Task class
+    │   └── process-data/              # process-data -> ProcessDataTask
+    │       ├── main.py
+    │       └── task.py
+    │
+    └── topic/                        # SNS Publishers
+        └── order_created.py           # OrderCreatedTopic
 ```
 
 ### Naming Conventions
@@ -117,7 +141,7 @@ from aws_python_helper.sqs.consumer_base import SQSConsumer
 
 class TitleIndexedConsumer(SQSConsumer):
     async def process_record(self, record):
-        body = self.parse_body(record)
+        body = self.extract_content_message(record)
         # Your logic here
         await self.db.constitution_db.titles.insert_one(body)
 ```
@@ -154,22 +178,22 @@ class GenerateRouteLambda(Lambda):
         # Validate input data
         if 'shipping_id' not in self.data:
             raise ValueError("shipping_id is required")
-        
+
         if not isinstance(self.data['shipping_id'], str):
             raise TypeError("shipping_id must be a string")
-    
+
     async def process(self):
         # Your business logic here
         shipping_id = self.data['shipping_id']
-        
+
         # Access to MongoDB
         shipping = await self.db.deliveries.shippings.find_one(
             {'_id': shipping_id}
         )
-        
+
         if not shipping:
             raise ValueError(f"Shipping {shipping_id} not found")
-        
+
         # Create route
         route = {
             'shipping_id': shipping_id,
@@ -177,11 +201,11 @@ class GenerateRouteLambda(Lambda):
             'status': 'pending',
             'created_at': datetime.utcnow()
         }
-        
+
         result = await self.db.deliveries.routes.insert_one(route)
-        
+
         self.logger.info(f"Route created: {result.inserted_id}")
-        
+
         # Return result
         return {
             'route_id': str(result.inserted_id),
@@ -285,23 +309,47 @@ class TitleIndexedTopic(SNSPublisher):
         super().__init__(
             topic_arn=os.getenv('TITLE_INDEXED_SNS_TOPIC_ARN')
         )
-    
-    async def publish_message(self, constitution_id, title):
-        await self.publish({
-            'constitution_id': constitution_id,
-            'title': title,
-            'event_type': 'title_indexed'
-        })
+
+    def build_message(self, constitution_id, title, event_type='title_indexed'):
+        return {
+            'content': {
+                'constitution_id': constitution_id,
+                'title': title,
+                'event_type': event_type
+            },
+            'attributes': {
+                'event_type': event_type   # Used for SNS subscription filtering
+            }
+        }
 ```
 
 **2. Use the topic** from anywhere:
 
 ```python
-from src.topics.title_indexed import TitleIndexedTopic
+from src.topic.title_indexed import TitleIndexedTopic
 
 # In a consumer, API or task
 topic = TitleIndexedTopic()
-await topic.publish_indexed('123', 'My Constitution')
+
+# Publish a single message
+await topic.publish(topic.build_message('123', 'My Constitution'))
+
+# Publish multiple messages in batch
+messages = [
+    topic.build_message('id1', 'Constitution A'),
+    topic.build_message('id2', 'Constitution B'),
+]
+await topic.publish(messages)
+```
+
+**Message format** — every message must have a `content` key:
+
+```python
+{
+    'content': {...},              # Required: message body (any dict)
+    'attributes': {...},           # Optional: SNS message attributes for filtering
+    'subject': 'Optional subject'  # Optional: message subject
+}
 ```
 
 ### Run a Fargate Task
@@ -316,10 +364,10 @@ class SearchTaxByTownTask(FargateTask):
     async def execute(self):
         town = self.require_env('TOWN')
         self.logger.info(f"Processing town: {town}")
-        
+
         # Access to DB
         docs = await self.db.smart_data.address.find({'town': town}).to_list()
-        
+
         # Your logic here
         for doc in docs:
             # Process document
@@ -368,7 +416,7 @@ def handler(event, context):
     executor = FargateExecutor()
     task_arn = executor.run_task(
         'search-tax-by-town',
-        envs={'town': 'Norwalk', 'only_tax': 'true'}
+        envs={'TOWN': 'Norwalk', 'ONLY_TAX': 'true'}
     )
     return {'taskArn': task_arn}
 ```
@@ -380,16 +428,46 @@ The framework provides flexible access to multiple databases:
 ```python
 class MyAPI(API):
     async def process(self):
-        # Access to different databases
+        # Access to different databases on the same cluster
         user = await self.db.users_db.users.find_one({'_id': user_id})
-        
+
         # Another database
         await self.db.analytics_db.logs.insert_one({'action': 'view'})
-        
+
         # Multiple collections
         titles = await self.db.constitution_db.titles.find().to_list(100)
         articles = await self.db.constitution_db.articles.find().to_list(100)
 ```
+
+The pattern is always: `self.db.<database_name>.<collection_name>.<motor_operation>()`
+
+### External MongoDB Clusters
+
+Connect to additional MongoDB clusters using `EXTERNAL_MONGODB_CONNECTIONS`:
+
+```bash
+EXTERNAL_MONGODB_CONNECTIONS='[
+    {"name": "ClusterDockets", "connection_string": "mongodb+srv://cluster.mongodb.net"},
+    {"name": "ClusterAnalytics", "connection_string": "mongodb+srv://analytics.mongodb.net"}
+]'
+```
+
+The credentials from `MONGO_DB_USER` / `MONGO_DB_PASSWORD` are automatically injected into the connection strings.
+
+Access external clusters via `self.external_db`:
+
+```python
+class AddressAPI(API):
+    async def process(self):
+        # Access external cluster: self.external_db.<ClusterName>.<database>.<collection>
+        addresses = await self.external_db.ClusterDockets.smart_data.addresses.find(
+            {'town': self.data['town']}
+        ).to_list(100)
+
+        self.set_body({'addresses': addresses})
+```
+
+`self.external_db` is available in `API`, `SQSConsumer`, `Lambda`, and `FargateTask`.
 
 ## 🔄 Routing Convention
 
@@ -412,6 +490,105 @@ The framework uses convention over configuration for the routing:
 - `GET` with **even number of parts** → **get** method
 - Other methods use their name directly
 
+## 🧩 API Class Reference
+
+All properties and methods available inside an `API` subclass:
+
+### Request Properties
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `self.data` | `dict` | Request body (POST/PUT) or query params (GET) |
+| `self.headers` | `dict` | HTTP request headers |
+| `self.path_parameters` | `dict` | URL path parameters (e.g. `/users/123` → `{'id': '123'}`) |
+| `self.query_parameters` | `dict` | Query string parameters |
+| `self.db` | `DatabaseProxy` | Access to main MongoDB cluster |
+| `self.external_db` | `ExternalDatabaseProxy` | Access to external MongoDB clusters |
+| `self.current_user` | `dict \| None` | Authenticated user document (requires `REQUIRE_AUTH=true`) |
+| `self.is_authenticated` | `bool` | Whether the request is authenticated |
+| `self.auth_data` | `dict \| None` | Full authentication data |
+
+### Response Methods
+
+| Method | Description |
+|--------|-------------|
+| `self.set_code(code: int)` | Set HTTP response status code |
+| `self.set_body(body: Any)` | Set response body (auto-serialized to JSON) |
+| `self.set_header(key: str, value: str)` | Add a single response header |
+| `self.set_headers(headers: dict)` | Set multiple response headers at once |
+
+### Methods to Override
+
+| Method | Required | Description |
+|--------|----------|-------------|
+| `async validate()` | Optional | Validate request data, raise exceptions to reject |
+| `async process()` | **Required** | Main business logic |
+
+```python
+class UserGetAPI(API):
+    async def validate(self):
+        # Access path params: /users/123 → self.path_parameters = {'id': '123'}
+        if not self.path_parameters.get('id'):
+            raise ValueError("User ID is required")
+
+    async def process(self):
+        user_id = self.path_parameters['id']
+        user = await self.db.users_db.users.find_one({'_id': user_id})
+
+        if not user:
+            self.set_code(404)
+            self.set_body({'error': 'User not found'})
+            return
+
+        self.set_code(200)
+        self.set_body({'data': user})
+        self.set_header('X-Resource-Id', user_id)
+```
+
+## 🔐 Authentication
+
+The framework includes a built-in token-based authentication middleware.
+
+### Configuration
+
+```bash
+REQUIRE_AUTH=true            # Enable authentication (default: false)
+AUTH_DB_NAME=my_database     # MongoDB database where tokens are stored
+AUTH_BYPASS_TOKEN=secret123  # Master token to bypass auth (for internal use)
+```
+
+### Using the authenticated user
+
+When `REQUIRE_AUTH=true`, every request must include a valid `Authorization: Bearer <token>` header. The authenticated user is available via `self.current_user`:
+
+```python
+class OrderListAPI(API):
+    async def process(self):
+        # self.current_user contains the user document from MongoDB
+        user_id = self.current_user['_id']
+
+        orders = await self.db.orders_db.orders.find(
+            {'user_id': user_id}
+        ).to_list(100)
+
+        self.set_body({'data': orders})
+```
+
+### Auth exceptions
+
+Use these exceptions in your `validate()` or `process()` methods:
+
+```python
+from aws_python_helper.api.exceptions import UnauthorizedError, ForbiddenError
+
+class AdminOnlyAPI(API):
+    async def validate(self):
+        if not self.is_authenticated:
+            raise UnauthorizedError("Authentication required")  # Returns 401
+
+        if self.current_user.get('role') != 'admin':
+            raise ForbiddenError("Admin access required")       # Returns 403
+```
 
 ## 🎯 Complete Example
 
@@ -425,28 +602,28 @@ class ConstitutionListAPI(API):
             limit = int(self.data['limit'])
             if limit > 1000:
                 raise ValueError("Limit cannot exceed 1000")
-    
+
     async def process(self):
         # Build filters
         filters = {}
         if 'country' in self.data:
             filters['country'] = self.data['country']
-        
+
         # Query MongoDB
         limit = int(self.data.get('limit', 100))
         results = await self.db.constitution_db.constitutions.find(
             filters
         ).limit(limit).to_list(limit)
-        
+
         # Count total
         total = await self.db.constitution_db.constitutions.count_documents(filters)
-        
+
         # Register in analytics
         await self.db.analytics_db.searches.insert_one({
             'filters': filters,
             'result_count': len(results)
         })
-        
+
         # Response
         self.set_body({
             'data': results,
@@ -474,7 +651,7 @@ class ShippingPostAPI(API):
         for field in required_fields:
             if field not in self.data:
                 raise ValueError(f"{field} is required")
-    
+
     async def process(self):
         # Create shipping in database
         shipping = {
@@ -484,10 +661,10 @@ class ShippingPostAPI(API):
             'status': 'pending',
             'route_pending': True
         }
-        
+
         result = await self.db.deliveries.shippings.insert_one(shipping)
         shipping_id = str(result.inserted_id)
-        
+
         # Invoke standalone lambda asynchronously to generate route
         lambda_client = boto3.client('lambda')
         lambda_client.invoke(
@@ -497,7 +674,7 @@ class ShippingPostAPI(API):
                 'data': {'shipping_id': shipping_id}
             })
         )
-        
+
         self.set_code(201)
         self.set_body({
             'shipping_id': shipping_id,
@@ -515,24 +692,24 @@ class GenerateRouteLambda(Lambda):
     async def validate(self):
         if 'shipping_id' not in self.data:
             raise ValueError("shipping_id is required")
-    
+
     async def process(self):
         shipping_id = self.data['shipping_id']
-        
+
         # Get shipping details
         shipping = await self.db.deliveries.shippings.find_one(
             {'_id': shipping_id}
         )
-        
+
         if not shipping:
             raise ValueError(f"Shipping {shipping_id} not found")
-        
+
         # Generate optimal route
         route = await self.calculate_optimal_route(shipping)
-        
+
         # Save route
         route_result = await self.db.deliveries.routes.insert_one(route)
-        
+
         # Update shipping
         await self.db.deliveries.shippings.update_one(
             {'_id': shipping_id},
@@ -542,12 +719,12 @@ class GenerateRouteLambda(Lambda):
                 'status': 'scheduled'
             }}
         )
-        
+
         return {
             'route_id': str(route_result.inserted_id),
             'shipping_id': shipping_id
         }
-    
+
     async def calculate_optimal_route(self, shipping):
         # Your route calculation logic here
         return {
@@ -575,48 +752,89 @@ __all__ = ['generate_route_handler']
 - Can retry lambda independently if it fails
 - Scalable architecture
 
+## 🏗️ Architecture Overview
+
+Typical flow for event-driven architectures using this framework:
+
+```
+┌──────────┐     ┌─────────────┐     ┌──────────────────────────────────────┐
+│  Client  │────▶│ API Gateway │────▶│  Lambda: api_handler                 │
+└──────────┘     └─────────────┘     │  (src/api/resource/post.py)          │
+                                     │  → validates, queries MongoDB,        │
+                                     │    publishes to SNS                   │
+                                     └────────────────┬─────────────────────┘
+                                                      │
+                                                      ▼
+                                             ┌─────────────────┐
+                                             │   SNS Topic     │
+                                             │ (fanout/filter) │
+                                             └────────┬────────┘
+                                      ┌───────────────┼───────────────┐
+                                      ▼               ▼               ▼
+                               ┌────────────┐  ┌────────────┐  ┌────────────┐
+                               │  SQS Queue │  │  SQS Queue │  │  SQS Queue │
+                               │  Platform A│  │  Platform B│  │  Platform C│
+                               └─────┬──────┘  └─────┬──────┘  └─────┬──────┘
+                                     │               │               │
+                                     ▼               ▼               ▼
+                               ┌──────────────────────────────────────────────┐
+                               │  Lambda: sqs_handler                         │
+                               │  (src/consumer/platform_consumer.py)         │
+                               │  → groups messages, acquires sessions,        │
+                               │    launches Fargate tasks                     │
+                               └───────────────────┬──────────────────────────┘
+                                                   │  FargateExecutor.run_task()
+                                                   ▼
+                               ┌──────────────────────────────────────────────┐
+                               │  Fargate Task: fargate_handler               │
+                               │  (src/task/my-task/task.py)                  │
+                               │  → scrapes/processes data,                   │
+                               │    writes results to MongoDB                  │
+                               └──────────────────────────────────────────────┘
+```
+
 ## 🔐 Environment Variables
 
 ### MongoDB Configuration
 
-El framework soporta dos formas de configurar MongoDB:
+The framework supports two ways to configure MongoDB:
 
-#### Opción 1: Connection String Completa
+#### Option 1: Full Connection String
 
 ```bash
-# URI completa con credenciales incluidas
+# Full URI with embedded credentials
 MONGODB_URI=mongodb+srv://user:password@cluster.mongodb.net/dbname?retryWrites=true&w=majority
-# o
+# or
 MONGO_DB_URI=mongodb+srv://user:password@cluster.mongodb.net/dbname
 ```
 
-#### Opción 2: Componentes Separados (Recomendado para Terraform)
+#### Option 2: Separate Components (Recommended for Terraform)
 
 ```bash
-# Host sin credenciales
+# Host without credentials
 MONGO_DB_HOST=mongodb+srv://cluster.mongodb.net
 
-# Credenciales separadas (más seguro)
+# Credentials (more secure)
 MONGO_DB_USER=admin
 MONGO_DB_PASSWORD=my-secure-password
 
-# Opcionales
+# Optional
 MONGO_DB_NAME=my_database
 MONGO_DB_OPTIONS=retryWrites=true&w=majority
 ```
 
-**Ventajas de usar componentes separados:**
-- ✅ Mejor seguridad: credenciales separadas del host
-- ✅ Fácil integración con Terraform/AWS Secrets Manager
-- ✅ Contraseñas con caracteres especiales se manejan automáticamente
-- ✅ Más flexible para diferentes entornos
+**Benefits of separate components:**
+- ✅ Better security: credentials separate from host
+- ✅ Easy integration with Terraform/AWS Secrets Manager
+- ✅ Passwords with special characters are handled automatically
+- ✅ More flexible for different environments
 
-El framework automáticamente:
-1. URL-encodea la contraseña (maneja `@`, `:`, `/`, etc.)
-2. Construye la URI completa
-3. Inicializa la conexión
+The framework automatically:
+1. URL-encodes the password (handles `@`, `:`, `/`, etc.)
+2. Builds the full URI
+3. Initializes the connection
 
-### Ejemplo en Terraform
+#### Terraform Example
 
 ```hcl
 environment_variables = {
@@ -626,20 +844,117 @@ environment_variables = {
 }
 ```
 
-## Rest Environment Variables
+### All Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MONGODB_URI` or `MONGO_DB_URI` | One of these or components below | Full MongoDB connection string |
+| `MONGO_DB_HOST` | Alt. to URI | MongoDB host (e.g. `mongodb+srv://cluster.net`) |
+| `MONGO_DB_USER` | Alt. to URI | MongoDB username |
+| `MONGO_DB_PASSWORD` | Alt. to URI | MongoDB password |
+| `MONGO_DB_NAME` | Optional | Default database name |
+| `MONGO_DB_OPTIONS` | Optional | Connection options (e.g. `retryWrites=true&w=majority`) |
+| `EXTERNAL_MONGODB_CONNECTIONS` | Optional | JSON array of external cluster configurations |
+| `REQUIRE_AUTH` | Optional | Enable authentication middleware (`true`/`false`) |
+| `AUTH_DB_NAME` | If `REQUIRE_AUTH=true` | MongoDB database for token validation |
+| `AUTH_BYPASS_TOKEN` | Optional | Master token to bypass authentication |
+| `ECS_CLUSTER` | Fargate only | ECS cluster name for `FargateExecutor` |
+| `ECS_SUBNETS` | Fargate only | Comma-separated subnet IDs for Fargate tasks |
+| `AWS_REGION` | Fargate/SNS/SQS | AWS region |
+| `AWS_ACCOUNT_ID` | SQS `get_queue_url` | AWS account ID |
+| `SERVICE_NAME` | SQS `get_queue_url` | Service name prefix for queue name |
+| `QUEUE_NAME` | SQS `get_queue_url` | Queue name segment |
+| `ENV` | SQS `get_queue_url` | Environment suffix (e.g. `prod`, `dev`) |
 
 ## 📊 Advanced Features
+
+### SQS Consumer - Batch Mode
+
+By default, consumers process messages one by one (`"single"` mode). Use `"batch"` mode when you need to group or bulk-process messages:
+
+```python
+from aws_python_helper.sqs.consumer_base import SQSConsumer
+
+class OrderConsumer(SQSConsumer):
+
+    @property
+    def processing_mode(self) -> str:
+        return "batch"
+
+    async def process_batch(self, records):
+        # Group records by some key before processing
+        grouped = {}
+        for record in records:
+            message_id = record.get('messageId')
+            body = self.extract_content_message(record)
+            key = body.get('region', 'default')
+            grouped.setdefault(key, []).append((message_id, body))
+
+        for region, messages in grouped.items():
+            try:
+                # Bulk operation for the whole group
+                docs = [msg[1] for msg in messages]
+                await self.db.orders_db.orders.insert_many(docs)
+            except Exception as e:
+                # Mark individual messages as failed
+                for message_id, _ in messages:
+                    self.add_message_failed(message_id, str(e))
+```
+
+**Key methods in SQSConsumer:**
+
+| Method / Property | Description |
+|-------------------|-------------|
+| `self.extract_content_message(record)` | Parse message body (handles SNS → SQS wrapping automatically) |
+| `self.parse_body(record)` | Alias for `extract_content_message` |
+| `self.add_message_failed(message_id, error)` | Mark a message for retry (batch mode) |
+| `self.get_queue_url()` | Get the SQS queue URL (uses `AWS_REGION`, `AWS_ACCOUNT_ID`, `SERVICE_NAME`, `QUEUE_NAME`, `ENV`) |
+| `self.db` | Access to main MongoDB cluster |
+| `self.external_db` | Access to external MongoDB clusters |
+
+**Retry behavior:**
+- Messages marked with `add_message_failed()` are reported via `reportBatchItemFailures`
+- AWS SQS retries **only** the failed messages, not the whole batch
+- Successful messages in the same batch are not retried
 
 ### SNS Publisher - Batch Publishing
 
 ```python
-# Publish multiple messages
 topic = TitleIndexedTopic()
-await topic.publish_batch_indexed([
-    {'constitution_id': 'id1', 'title': 'Title 1'},
-    {'constitution_id': 'id2', 'title': 'Title 2'},
-    {'constitution_id': 'id3', 'title': 'Title 3'}
+
+# Publish multiple messages in a single call
+await topic.publish([
+    {'content': {'id': 'id1', 'title': 'Title 1'}, 'attributes': {'type': 'created'}},
+    {'content': {'id': 'id2', 'title': 'Title 2'}, 'attributes': {'type': 'updated'}},
+    {'content': {'id': 'id3', 'title': 'Title 3'}},  # attributes are optional
 ])
+```
+
+### SNS - Message Attributes for Filtering
+
+Use `attributes` to filter which SQS subscriptions receive each message:
+
+```python
+class EventTopic(SNSPublisher):
+    def __init__(self):
+        super().__init__(topic_arn=os.getenv('EVENTS_SNS_TOPIC_ARN'))
+
+    def build_message(self, payload, event_type, priority='normal'):
+        return {
+            'content': payload,
+            'attributes': {
+                'event_type': event_type,   # SQS subscriptions can filter on this
+                'priority': priority
+            }
+        }
+
+# Usage
+topic = EventTopic()
+await topic.publish(topic.build_message(
+    payload={'order_id': '123', 'amount': 99.99},
+    event_type='order_created',
+    priority='high'
+))
 ```
 
 ### Fargate - Run multiple tasks
@@ -649,9 +964,9 @@ executor = FargateExecutor()
 task_arns = executor.run_task_batch(
     'search-tax-by-town',
     [
-        {'town': 'Norwalk'},
-        {'town': 'Stamford'},
-        {'town': 'Bridgeport'}
+        {'TOWN': 'Norwalk'},
+        {'TOWN': 'Stamford'},
+        {'TOWN': 'Bridgeport'}
     ]
 )
 ```
@@ -660,7 +975,7 @@ task_arns = executor.run_task_batch(
 
 ```python
 executor = FargateExecutor()
-task_arn = executor.run_task('my-task', {'param': 'value'})
+task_arn = executor.run_task('my-task', {'PARAM': 'value'})
 
 # Check task status
 status = executor.get_task_status(task_arn)
@@ -668,19 +983,51 @@ print(f"Status: {status['status']}")
 print(f"Started at: {status['started_at']}")
 ```
 
-### SNS - Message Attributes
+### JSON Utilities for MongoDB Types
+
+When returning MongoDB documents in API responses or exporting data, use the built-in serializers to handle `ObjectId`, `datetime`, `Decimal128`, and other BSON types:
 
 ```python
-# Publish with attributes for SNS filtering
-topic = ConstitutionCreatedTopic()
-await topic.publish_created(
-    constitution_id='123',
-    title='New Constitution',
-    country='Ecuador',
-    year=2023,
-    created_by='user_456',
-    attributes={'priority': 'high', 'region': 'latam'}
-)
+import json
+from aws_python_helper.utils.json_encoder import MongoJSONEncoder, mongo_json_dumps
+from aws_python_helper.utils.serializer import serialize_mongo_types
+
+# Use as json.dumps cls parameter
+json_str = json.dumps(my_mongo_doc, cls=MongoJSONEncoder)
+
+# Helper function
+json_str = mongo_json_dumps(my_mongo_doc)
+
+# Convert a document in-place (dict → JSON-serializable dict)
+clean_doc = serialize_mongo_types(my_mongo_doc)
+```
+
+Types automatically converted:
+
+| MongoDB Type | Converts to |
+|-------------|-------------|
+| `ObjectId` | `str` |
+| `datetime` | ISO 8601 string |
+| `date` | ISO 8601 string |
+| `Decimal128` | `float` |
+| `Decimal` | `float` |
+| `Binary` | base64 `str` |
+| `UUID` | `str` |
+| `bytes` | base64 `str` |
+| `set` | `list` |
+
+**Common use case** — exporting query results to JSON files:
+
+```python
+from aws_python_helper.utils.json_encoder import MongoJSONEncoder
+
+class ExportResultsAPI(API):
+    async def process(self):
+        records = await self.db.orders_db.orders.find({}).to_list(1000)
+
+        # Write to file with MongoJSONEncoder
+        with open('/tmp/export.json', 'w') as f:
+            json.dump(records, f, cls=MongoJSONEncoder, ensure_ascii=False, indent=2)
 ```
 
 ## 🤝 Contributing
