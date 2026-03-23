@@ -40,6 +40,7 @@ All available classes and functions:
 | `FargateTask` | `aws_python_helper.fargate.task_base` | Base class for Fargate tasks |
 | `FargateExecutor` | `aws_python_helper.fargate.executor` | Launches Fargate tasks from Lambda |
 | `fargate_handler` | `aws_python_helper.fargate.handler` | Entry point handler for Fargate |
+| `Repository` | `aws_python_helper.repository.base` | Base class for MongoDB repositories |
 | `MongoJSONEncoder` | `aws_python_helper.utils.json_encoder` | JSON encoder for MongoDB types |
 | `mongo_json_dumps` | `aws_python_helper.utils.json_encoder` | Helper to serialize MongoDB types |
 | `serialize_mongo_types` | `aws_python_helper.utils.serializer` | Recursively serialize MongoDB types |
@@ -468,6 +469,143 @@ class AddressAPI(API):
 ```
 
 `self.external_db` is available in `API`, `SQSConsumer`, `Lambda`, and `FargateTask`.
+
+## 🗂️ Repository Pattern
+
+The framework provides a `Repository` base class that eliminates repetitive boilerplate in data access layers. Each repository only declares what collection it uses, whether it belongs to an external cluster, and what indexes to create. The base class handles the MongoDB connection and index creation automatically.
+
+### Properties to override
+
+| Property | Type | Default | Required |
+|----------|------|---------|----------|
+| `collection_name` | `str` | — | **Yes** |
+| `database_name` | `str` | `"core"` | No |
+| `is_external` | `bool` | `False` | No |
+| `cluster_name` | `str` | `None` | Only if `is_external=True` |
+| `indexes` | `list` | `[]` | No |
+
+### Index format
+
+```python
+@property
+def indexes(self):
+    return [
+        {"key": [("field", 1)]},                               # simple ASC
+        {"key": [("field", -1)]},                              # simple DESC
+        {"key": [("f1", 1), ("f2", -1)], "unique": True},     # compound + unique
+        {"key": [("expires_at", 1)], "expireAfterSeconds": 0}, # TTL index
+    ]
+```
+
+Indexes are created automatically in the background on first collection access — no need to call any initialization method.
+
+### Repository on the main cluster (`database_name` defaults to `"core"`)
+
+```python
+from aws_python_helper import Repository
+
+class TownsRepository(Repository):
+
+    @property
+    def collection_name(self):
+        return "towns"
+
+    @property
+    def indexes(self):
+        return [
+            {"key": [("name", 1)]},
+            {"key": [("platform", 1)]},
+        ]
+
+    async def get_available(self, platforms):
+        return await self.collection.find(
+            {"platform": {"$in": platforms}},
+            {"name": 1, "platform": 1}
+        ).to_list(length=None)
+
+    async def find_by_name(self, name):
+        return await self.collection.find_one({"name": name})
+```
+
+### Repository on a different database (not `"core"`)
+
+```python
+from aws_python_helper import Repository
+
+class LandRecordsRepository(Repository):
+
+    @property
+    def database_name(self):
+        return "land_data"
+
+    @property
+    def collection_name(self):
+        return "records"
+
+    @property
+    def indexes(self):
+        return [
+            {"key": [("unique_id", 1)]},
+            {"key": [("owner", 1), ("town", 1)]},
+        ]
+
+    async def bulk_upsert(self, records):
+        from pymongo import UpdateOne
+        operations = [
+            UpdateOne({"unique_id": r["unique_id"]}, {"$set": r}, upsert=True)
+            for r in records
+        ]
+        result = await self.collection.bulk_write(operations)
+        return {"upserted": result.upserted_count, "modified": result.modified_count}
+```
+
+### Repository on an external cluster
+
+```python
+from aws_python_helper import Repository
+
+class AddressRepository(Repository):
+
+    @property
+    def database_name(self):
+        return "smart_data"
+
+    @property
+    def collection_name(self):
+        return "address"
+
+    @property
+    def is_external(self):
+        return True
+
+    @property
+    def cluster_name(self):
+        return "ClusterDockets"  # Must match a name in EXTERNAL_MONGODB_CONNECTIONS
+
+    async def find_by_query(self, query, limit=None):
+        cursor = self.collection.find(query)
+        if limit:
+            cursor = cursor.limit(limit)
+        return await cursor.to_list(length=None)
+```
+
+### Instantiation — no `db` argument needed
+
+```python
+class MyAPI(API):
+
+    @property
+    def towns_repository(self):
+        if not self._towns_repository:
+            self._towns_repository = TownsRepository()  # no args!
+        return self._towns_repository
+
+    async def process(self):
+        towns = await self.towns_repository.get_available(["platform_a", "platform_b"])
+        self.set_body({"towns": towns})
+```
+
+The repository connects itself using the already-initialized `MongoManager` singleton — the same one used by `self.db`. No need to pass `self.db` or any connection object.
 
 ## 🔄 Routing Convention
 

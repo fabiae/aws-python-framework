@@ -24,6 +24,9 @@ from .lambda_standalone.handler import lambda_handler
 from .utils.json_encoder import MongoJSONEncoder, mongo_json_dumps
 from .utils.serializer import serialize_mongo_types
 
+# Repository
+from .repository.base import Repository
+
 
 __all__ = [
     'API',
@@ -34,6 +37,7 @@ __all__ = [
     'FargateTask',
     'FargateExecutor',
     'Lambda',
+    'Repository',
     'fargate_handler',
     'api_handler',
     'sqs_handler',
