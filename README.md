@@ -9,6 +9,7 @@ Mini-framework to create REST APIs, SQS Consumers, SNS Publishers, Fargate Tasks
 - **OOP structure**: Object-oriented programming for your code
 - **Flexible MongoDB**: Direct access to multiple databases without models
 - **External MongoDB**: Connect to multiple MongoDB clusters simultaneously
+- **Multi-state routing**: Automatic `constitution-state` propagation across the entire call chain for per-state database routing
 - **SQS Consumers**: Same pattern to process SQS messages (single or batch mode)
 - **SNS Publishers**: Same pattern to publish messages to SNS topics
 - **Fargate Tasks**: Same pattern to run tasks in Fargate containers
@@ -41,6 +42,8 @@ All available classes and functions:
 | `FargateExecutor` | `aws_python_helper.fargate.executor` | Launches Fargate tasks from Lambda |
 | `fargate_handler` | `aws_python_helper.fargate.handler` | Entry point handler for Fargate |
 | `Repository` | `aws_python_helper.repository.base` | Base class for MongoDB repositories |
+| `get_state` | `aws_python_helper` | Read the current constitution-state from async context |
+| `set_state` | `aws_python_helper` | Set the current constitution-state in async context |
 | `MongoJSONEncoder` | `aws_python_helper.utils.json_encoder` | JSON encoder for MongoDB types |
 | `mongo_json_dumps` | `aws_python_helper.utils.json_encoder` | Helper to serialize MongoDB types |
 | `serialize_mongo_types` | `aws_python_helper.utils.serializer` | Recursively serialize MongoDB types |
@@ -249,6 +252,7 @@ response = lambda_client.invoke(
     FunctionName='GenerateRouteLambda',
     InvocationType='RequestResponse',
     Payload=json.dumps({
+        'constitution-state': 'connecticut',  # Required
         'data': {
             'shipping_id': '507f1f77bcf86cd799439011'
         }
@@ -272,6 +276,7 @@ lambda_client.invoke(
     FunctionName='GenerateRouteLambda',
     InvocationType='Event',  # Asynchronous
     Payload=json.dumps({
+        'constitution-state': 'connecticut',  # Required
         'data': {
             'shipping_id': '507f1f77bcf86cd799439011'
         }
@@ -415,6 +420,7 @@ from aws_python_helper.fargate.executor import FargateExecutor
 
 def handler(event, context):
     executor = FargateExecutor()
+    # constitution-state is auto-propagated as CONSTITUTION_STATE env var in the container
     task_arn = executor.run_task(
         'search-tax-by-town',
         envs={'TOWN': 'Norwalk', 'ONLY_TAX': 'true'}
@@ -479,10 +485,16 @@ The framework provides a `Repository` base class that eliminates repetitive boil
 | Property | Type | Default | Required |
 |----------|------|---------|----------|
 | `collection_name` | `str` | — | **Yes** |
-| `database_name` | `str` | `"core"` | No |
+| `database_key` | `str \| None` | `None` | No — if `None`, uses `constitution-state` from context |
 | `is_external` | `bool` | `False` | No |
 | `cluster_name` | `str` | `None` | Only if `is_external=True` |
 | `indexes` | `list` | `[]` | No |
+
+**`database_key` controls how the database is resolved:**
+- `database_key = "core"` (or any string) → always connects to that specific database.
+- `database_key = None` (default) → reads `constitution-state` from the async context automatically. This makes the repository **state-scoped**: it connects to `"connecticut"`, `"new_jersey"`, etc. depending on the current request.
+
+Collections are cached per `(database_name, collection_name)` key — state-scoped repositories correctly isolate state between concurrent requests.
 
 ### Index format
 
@@ -499,7 +511,7 @@ def indexes(self):
 
 Indexes are created automatically in the background on first collection access — no need to call any initialization method.
 
-### Repository on the main cluster (`database_name` defaults to `"core"`)
+### Repository with a fixed database
 
 ```python
 from aws_python_helper import Repository
@@ -509,6 +521,10 @@ class TownsRepository(Repository):
     @property
     def collection_name(self):
         return "towns"
+
+    @property
+    def database_key(self):
+        return "core"  # always connects to the "core" database
 
     @property
     def indexes(self):
@@ -527,7 +543,9 @@ class TownsRepository(Repository):
         return await self.collection.find_one({"name": name})
 ```
 
-### Repository on a different database (not `"core"`)
+### State-scoped repository (no `database_key`)
+
+When `database_key` is not set, the repository reads the current `constitution-state` from context and uses it as the database name. The same repository instance connects to `"connecticut"` for one request and to `"new_jersey"` for another — automatically.
 
 ```python
 from aws_python_helper import Repository
@@ -535,12 +553,12 @@ from aws_python_helper import Repository
 class LandRecordsRepository(Repository):
 
     @property
-    def database_name(self):
-        return "land_data"
-
-    @property
     def collection_name(self):
         return "records"
+
+    # No database_key → uses get_state() automatically
+    # If constitution-state = "connecticut" → connects to DB "connecticut"
+    # If constitution-state = "new_jersey"  → connects to DB "new_jersey"
 
     @property
     def indexes(self):
@@ -559,6 +577,8 @@ class LandRecordsRepository(Repository):
         return {"upserted": result.upserted_count, "modified": result.modified_count}
 ```
 
+> **Note:** A `ValueError` is raised at runtime if `database_key` is `None` and `constitution-state` has not been set in the context. This is prevented automatically by the framework at every entry point (API, Lambda, SQS, Fargate).
+
 ### Repository on an external cluster
 
 ```python
@@ -567,7 +587,7 @@ from aws_python_helper import Repository
 class AddressRepository(Repository):
 
     @property
-    def database_name(self):
+    def database_key(self):
         return "smart_data"
 
     @property
@@ -606,6 +626,68 @@ class MyAPI(API):
 ```
 
 The repository connects itself using the already-initialized `MongoManager` singleton — the same one used by `self.db`. No need to pass `self.db` or any connection object.
+
+## 🌐 Constitution State
+
+The framework uses a `constitution-state` value to support **multi-state database routing** — connecting each request to the correct database based on the state it belongs to (e.g., `"connecticut"`, `"new_jersey"`). This value is propagated automatically across the entire async call chain using Python's `contextvars.ContextVar`, so you never need to pass it manually between layers.
+
+### How the framework injects it at each entry point
+
+| Entry point | How `constitution-state` is read |
+|-------------|----------------------------------|
+| **API Gateway** | HTTP header `constitution-state` — **required**, returns `400` if missing |
+| **Standalone Lambda** | Field `constitution-state` in the event payload — **required**, raises `ValueError` if missing |
+| **SQS Consumer (single mode)** | Per-record: reads from SNS `MessageAttributes['constitution-state']`, falls back to `body.constitution_state` |
+| **SQS Consumer (batch mode)** | Groups records by state; calls `process_batch()` once per group with the correct state in context |
+| **Fargate Task** | Env var `CONSTITUTION_STATE` — auto-injected by `FargateExecutor` |
+
+### How the framework propagates it to downstream services
+
+| Downstream service | Propagation mechanism |
+|--------------------|-----------------------|
+| **SNS Publisher** | Auto-injects `constitution-state` as a `MessageAttribute` on every published message |
+| **FargateExecutor** | Auto-injects `CONSTITUTION_STATE` as an env var when launching Fargate containers |
+
+This means that an API call with `constitution-state: connecticut` will automatically carry that state through SNS → SQS → Fargate without any code changes in your consumers or tasks.
+
+### State-scoped repositories
+
+Repositories with no `database_key` (default) read `constitution-state` from context to resolve the target database automatically. See the [Repository Pattern](#️-repository-pattern) section for details.
+
+### Manual access
+
+If you need to read or set the state manually (e.g., in tests or utility code):
+
+```python
+from aws_python_helper import get_state, set_state
+
+state = get_state()      # e.g. "connecticut", or None if not set
+set_state("new_jersey")  # set manually (the framework does this automatically)
+```
+
+### API example — `constitution-state` header
+
+```
+GET /constitutions HTTP/1.1
+constitution-state: connecticut
+Authorization: Bearer <token>
+```
+
+### Lambda invocation example — `constitution-state` in event
+
+```python
+import boto3, json
+
+lambda_client = boto3.client('lambda')
+lambda_client.invoke(
+    FunctionName='MyLambdaFunction',
+    InvocationType='RequestResponse',
+    Payload=json.dumps({
+        'constitution-state': 'connecticut',   # Required
+        'data': {'key': 'value'}
+    })
+)
+```
 
 ## 🔄 Routing Convention
 
@@ -998,6 +1080,7 @@ environment_variables = {
 | `AUTH_BYPASS_TOKEN` | Optional | Master token to bypass authentication |
 | `ECS_CLUSTER` | Fargate only | ECS cluster name for `FargateExecutor` |
 | `ECS_SUBNETS` | Fargate only | Comma-separated subnet IDs for Fargate tasks |
+| `CONSTITUTION_STATE` | Fargate only (auto) | State injected automatically by `FargateExecutor` — do not set manually |
 | `AWS_REGION` | Fargate/SNS/SQS | AWS region |
 | `AWS_ACCOUNT_ID` | SQS `get_queue_url` | AWS account ID |
 | `SERVICE_NAME` | SQS `get_queue_url` | Service name prefix for queue name |
@@ -1008,7 +1091,11 @@ environment_variables = {
 
 ### SQS Consumer - Batch Mode
 
-By default, consumers process messages one by one (`"single"` mode). Use `"batch"` mode when you need to group or bulk-process messages:
+By default, consumers process messages one by one (`"single"` mode). Use `"batch"` mode when you need to group or bulk-process messages.
+
+**Constitution-state handling in SQS:**
+- **Single mode**: the framework extracts `constitution-state` from each record automatically (from SNS `MessageAttributes`, then from `body.constitution_state`) and sets it in context before calling `process_record()`. You do not need to extract it yourself.
+- **Batch mode**: the framework groups the incoming records by `constitution-state` and calls `process_batch()` once per group, with the correct state in context for each group. This ensures that state-scoped repositories resolve to the right database even when a batch contains records from different states.
 
 ```python
 from aws_python_helper.sqs.consumer_base import SQSConsumer
@@ -1057,10 +1144,13 @@ class OrderConsumer(SQSConsumer):
 
 ### SNS Publisher - Batch Publishing
 
+The `SNSPublisher` automatically injects the current `constitution-state` as a `MessageAttribute` on every published message. SQS consumers built with this framework will then extract it automatically, ensuring the state flows end-to-end through the SNS → SQS chain without any manual code.
+
 ```python
 topic = TitleIndexedTopic()
 
 # Publish multiple messages in a single call
+# constitution-state is auto-injected as a MessageAttribute on each message
 await topic.publish([
     {'content': {'id': 'id1', 'title': 'Title 1'}, 'attributes': {'type': 'created'}},
     {'content': {'id': 'id2', 'title': 'Title 2'}, 'attributes': {'type': 'updated'}},

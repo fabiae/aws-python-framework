@@ -4,10 +4,11 @@ SQS Consumer Base - Base class for all SQS consumers
 
 import os
 from abc import ABC, abstractmethod
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 import json
 
+from ..context.state import set_state
 from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
 from ..database.external_mongo_manager import ExternalMongoManager
@@ -263,6 +264,54 @@ class SQSConsumer(ABC):
         else:
             self.logger.error(f"Message {message_id} marked as failed")
     
+    def _extract_state(self, record: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract constitution-state from an SQS record without setting it in the context.
+
+        Looks first in SNS MessageAttributes (injected automatically by SNSPublisher),
+        then falls back to the parsed message body content.
+
+        Args:
+            record: SQS record
+
+        Returns:
+            The state string if found, None otherwise
+        """
+        # Primary: SNS MessageAttributes (auto-injected by SNSPublisher)
+        raw_body = record.get('body', '{}')
+        if isinstance(raw_body, str):
+            try:
+                raw_body_json = json.loads(raw_body)
+            except json.JSONDecodeError:
+                raw_body_json = {}
+        else:
+            raw_body_json = raw_body or {}
+
+        if isinstance(raw_body_json, dict) and 'MessageAttributes' in raw_body_json:
+            state_attr = raw_body_json['MessageAttributes'].get('constitution-state', {})
+            state = state_attr.get('Value')
+            if state:
+                return state
+
+        # Fallback: parsed body content (for direct SQS messages without SNS wrapping)
+        body = self.extract_content_message(record)
+        return body.get("constitution_state") or body.get("content", {}).get("constitution_state")
+
+    def _extract_and_set_state(self, record: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract constitution-state from an SQS record and set it in the context.
+
+        Args:
+            record: SQS record
+
+        Returns:
+            The state string if found, None otherwise
+        """
+        state = self._extract_state(record)
+        if state:
+            set_state(state)
+        return state
+
     async def _process_batch_internal(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Internal method called by the handler to process a batch of SQS records
@@ -325,61 +374,65 @@ class SQSConsumer(ABC):
     
     async def _process_batch_wrapper(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Wrapper for batch mode processing with automatic error handling
-        
-        This method wraps the user's process_batch() implementation with try-except
-        to catch any unhandled exceptions. It also merges failed messages marked
-        with add_message_failed() into the results.
-        
-        Internal method used when processing_mode is "batch"
+        Wrapper for batch mode processing with automatic error handling.
+
+        Groups records by constitution-state so that each call to process_batch()
+        has the correct state set in context. This ensures that repositories
+        resolve to the right database even when a batch contains records from
+        different states (e.g. connecticut + new_jersey in the same SQS batch).
+
+        Internal method used when processing_mode is "batch".
         """
-        # Get all message IDs upfront
-        message_ids = [record.get('messageId', f'record-{i}') for i, record in enumerate(records)]
-        results = []
-        
-        try:
-            # Call the user's process_batch implementation (no return value expected)
-            await self.process_batch(records)
-            
-            # Build results based on _failed_messages
-            # All messages are successful by default, except those marked as failed
-            for message_id in message_ids:
-                # Check if this message was marked as failed
-                failed_msg = next((fm for fm in self._failed_messages if fm['messageId'] == message_id), None)
-                if failed_msg:
-                    # Message was marked as failed
-                    results.append({
-                        'messageId': message_id,
+        all_results = []
+
+        # Group records by constitution-state
+        state_groups: Dict[Optional[str], List[Dict[str, Any]]] = {}
+        for record in records:
+            state = self._extract_state(record)
+            state_groups.setdefault(state, []).append(record)
+
+        for state, group_records in state_groups.items():
+            if state:
+                set_state(state)
+
+            self._failed_messages = []  # reset per state group
+
+            try:
+                await self.process_batch(group_records)
+            except Exception as e:
+                self.logger.exception(f"Unhandled exception in process_batch (state={state}): {e}")
+                for record in group_records:
+                    msg_id = record.get('messageId', '')
+                    all_results.append({
+                        'messageId': msg_id,
+                        'success': False,
+                        'error': str(e),
+                        'itemIdentifier': msg_id,
+                    })
+                continue
+
+            failed_ids = {fm['messageId'] for fm in self._failed_messages}
+            for record in group_records:
+                msg_id = record.get('messageId', '')
+                if msg_id in failed_ids:
+                    failed_msg = next(fm for fm in self._failed_messages if fm['messageId'] == msg_id)
+                    all_results.append({
+                        'messageId': msg_id,
                         'success': False,
                         'error': failed_msg.get('error'),
-                        'itemIdentifier': failed_msg['itemIdentifier']
+                        'itemIdentifier': failed_msg['itemIdentifier'],
                     })
                 else:
-                    # Message was successful
-                    results.append({
-                        'messageId': message_id,
-                        'success': True
-                    })
-            
-        except Exception as e:
-            # If the entire batch processing fails, mark all messages as failed
-            self.logger.exception(f"Unhandled exception in process_batch: {e}")
-            for message_id in message_ids:
-                results.append({
-                    'messageId': message_id,
-                    'success': False,
-                    'error': str(e),
-                    'itemIdentifier': message_id
-                })
-        
+                    all_results.append({'messageId': msg_id, 'success': True})
+
         # Log summary
-        success_count = sum(1 for r in results if r.get('success', False))
-        failed_count = len(results) - success_count
+        success_count = sum(1 for r in all_results if r.get('success', False))
+        failed_count = len(all_results) - success_count
         self.logger.info(
             f"Batch processing complete: {success_count} successful, {failed_count} failed"
         )
-        
-        return results
+
+        return all_results
     
     
     async def _process_batch_single(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -395,8 +448,11 @@ class SQSConsumer(ABC):
         
         for i, record in enumerate(records):
             message_id = record.get('messageId', f'record-{i}')
-            
+
             try:
+                # Auto-extract and set constitution-state for this record
+                self._extract_and_set_state(record)
+
                 self.logger.info(f"Processing message: {message_id}")
                 await self.process_record(record)
                 results.append({

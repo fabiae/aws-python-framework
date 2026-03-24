@@ -9,10 +9,11 @@ pass a database connection or call any initialization method.
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ..database.mongo_manager import MongoManager
 from ..database.external_mongo_manager import ExternalMongoManager
+from ..context.state import get_state
 
 
 class Repository(ABC):
@@ -21,23 +22,32 @@ class Repository(ABC):
 
     Subclasses only need to declare which collection they use,
     whether it is external, and what indexes to create.
-    The connection and index creation are handled automatically.
+    The connection, database resolution, and index creation are handled automatically.
 
     Required properties to override:
         collection_name (str): Name of the MongoDB collection.
 
     Optional properties to override:
-        database_name (str): Name of the database. Default: "core".
-        is_external (bool): Whether to use an external cluster. Default: False.
+        database_key (str | None): Explicit database name to use.
+            - If set (e.g., 'core', 'smart_data'): always uses that database.
+            - If None (default): uses the constitution-state contextvar automatically.
+              This makes the repository "state-scoped" — it connects to the database
+              matching the current request state (e.g., 'connecticut', 'new_jersey').
+        is_external (bool): Whether to use an external MongoDB cluster. Default: False.
         cluster_name (str): External cluster name. Required if is_external=True.
         indexes (list): List of index definitions to create automatically.
 
     Usage:
+        # Core repository — always uses 'core' database
         class TownsRepository(Repository):
 
             @property
             def collection_name(self):
                 return "towns"
+
+            @property
+            def database_key(self):
+                return "core"
 
             @property
             def indexes(self):
@@ -49,14 +59,19 @@ class Repository(ABC):
             async def get_all(self):
                 return await self.collection.find({}).to_list(length=None)
 
-        # Instantiate without passing any db connection
-        repo = TownsRepository()
+        # State-scoped repository — connects to the current constitution-state database
+        class LandRecordsRepository(Repository):
 
-    External cluster usage:
+            @property
+            def collection_name(self):
+                return "land_records"
+            # No database_key → uses get_state() automatically
+
+        # External cluster repository
         class AddressRepository(Repository):
 
             @property
-            def database_name(self):
+            def database_key(self):
                 return "smart_data"
 
             @property
@@ -70,12 +85,15 @@ class Repository(ABC):
             @property
             def cluster_name(self):
                 return "ClusterDockets"
+
+        # Instantiate without passing any db connection
+        repo = TownsRepository()
     """
 
     def __init__(self):
         self.logger = logging.getLogger(self.__class__.__name__)
-        self._indexes_created = False
-        self._collection_ref = None
+        self._collection_cache: Dict[Tuple[str, str], Any] = {}
+        self._indexes_created: Dict[Tuple[str, str], bool] = {}
 
     @property
     @abstractmethod
@@ -84,9 +102,37 @@ class Repository(ABC):
         ...
 
     @property
+    def database_key(self) -> Optional[str]:
+        """
+        Explicit database name to use.
+
+        - If set (e.g., 'core', 'smart_data'): always connects to that database.
+        - If None (default): uses the current constitution-state contextvar,
+          making this repository state-scoped (different database per request state).
+        """
+        return None
+
+    @property
     def database_name(self) -> str:
-        """Name of the MongoDB database. Default: 'core'."""
-        return "core"
+        """
+        Resolved database name.
+
+        Uses database_key if set. Otherwise reads the current constitution-state
+        from the contextvar (set automatically by the framework at every entry point).
+
+        Raises:
+            ValueError: If database_key is None and constitution-state is not set in context.
+        """
+        if self.database_key is not None:
+            return self.database_key
+
+        state = get_state()
+        if not state:
+            raise ValueError(
+                f"{self.__class__.__name__}: 'constitution-state' is required but not set in context. "
+                f"Set database_key to a fixed value, or ensure constitution-state is passed in the request."
+            )
+        return state
 
     @property
     def is_external(self) -> bool:
@@ -130,11 +176,19 @@ class Repository(ABC):
 
         Resolves the collection from MongoManager (main cluster) or
         ExternalMongoManager (external cluster) based on is_external.
+        The database is resolved via database_name (which reads database_key
+        or the constitution-state contextvar).
 
-        On first access, schedules index creation as a background asyncio task
-        so indexes are created without blocking the caller.
+        Collections are cached per (database_name, collection_name) key,
+        so state-scoped repositories resolve the correct collection for each
+        request state without cross-contamination between requests.
+
+        On first access for a given key, schedules index creation as a
+        background asyncio task so indexes are created without blocking the caller.
         """
-        if self._collection_ref is None:
+        key = (self.database_name, self.collection_name)
+
+        if key not in self._collection_cache:
             if self.is_external:
                 if not self.cluster_name:
                     raise ValueError(
@@ -144,20 +198,16 @@ class Repository(ABC):
             else:
                 db = MongoManager.get_database(self.database_name)
 
-            self._collection_ref = db[self.collection_name]
+            self._collection_cache[key] = db[self.collection_name]
 
             # Schedule index creation as a background task on the running event loop.
-            # This works because all framework handlers use loop.run_until_complete(),
-            # which keeps the loop running while user code executes.
-            # create_task() simply adds a coroutine to the existing loop queue
-            # without modifying or interrupting it.
-            if self.indexes and not self._indexes_created:
+            if self.indexes and not self._indexes_created.get(key):
                 try:
                     asyncio.get_running_loop().create_task(self.ensure_indexes())
                 except RuntimeError:
                     pass  # No running event loop (e.g. synchronous test context)
 
-        return self._collection_ref
+        return self._collection_cache[key]
 
     async def ensure_indexes(self):
         """
@@ -167,22 +217,23 @@ class Repository(ABC):
         Can also be called explicitly at the start of a method when index
         creation must be guaranteed to complete before proceeding.
 
-        Idempotent: safe to call multiple times, only runs once.
+        Idempotent: safe to call multiple times, only runs once per (database, collection).
         """
-        if self._indexes_created:
+        key = (self.database_name, self.collection_name)
+        if self._indexes_created.get(key):
             return
 
         for index_def in self.indexes:
-            key = index_def.get("key")
-            if not key:
+            index_key = index_def.get("key")
+            if not index_key:
                 self.logger.warning(f"Index definition missing 'key': {index_def}")
                 continue
             options = {k: v for k, v in index_def.items() if k != "key"}
             options.setdefault("background", True)
             try:
-                await self.collection.create_index(key, **options)
-                self.logger.debug(f"Index created: {key}")
+                await self.collection.create_index(index_key, **options)
+                self.logger.debug(f"Index created: {index_key}")
             except Exception as e:
-                self.logger.error(f"Error creating index {key}: {e}")
+                self.logger.error(f"Error creating index {index_key}: {e}")
 
-        self._indexes_created = True
+        self._indexes_created[key] = True

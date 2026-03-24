@@ -12,6 +12,7 @@ from .base import API
 from .exceptions import UnauthorizedError, ForbiddenError, AuthenticationError
 from .auth_middleware import AuthMiddleware
 from .auth_validators import TokenValidator
+from ..context.state import set_state
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,20 @@ class Dispatcher:
             require_auth = os.getenv('REQUIRE_AUTH', 'false').lower() == 'true'
             if require_auth:
                 await self._authenticate(api)
-            
+
+            # 2.5 Setup constitution-state context
+            state = self.headers.get('constitution-state')
+            if not state:
+                return {
+                    'code': 400,
+                    'body': {
+                        'error': 'Bad Request',
+                        'message': "Header 'constitution-state' is required"
+                    },
+                    'headers': {}
+                }
+            set_state(state)
+
             # 3. Validate
             await api.validate()
             

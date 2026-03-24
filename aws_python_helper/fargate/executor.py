@@ -10,6 +10,8 @@ import logging
 import boto3
 from typing import Dict, Any, List, Optional
 
+from ..context.state import get_state
+
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +120,12 @@ class FargateExecutor:
                 {'name': key.upper(), 'value': str(value)}
                 for key, value in envs.items()
             ]
-            
+
+            # Auto-propagate constitution-state from current context
+            current_state = get_state()
+            if current_state and 'CONSTITUTION_STATE' not in {e['name'] for e in environment}:
+                environment.append({'name': 'CONSTITUTION_STATE', 'value': current_state})
+
             # Add TASK_NAME for the handler to know which task to execute
             environment.append({'name': 'TASK_NAME', 'value': task_name})
             

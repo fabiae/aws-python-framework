@@ -27,6 +27,9 @@ from .utils.serializer import serialize_mongo_types
 # Repository
 from .repository.base import Repository
 
+# Context
+from .context.state import get_state, set_state
+
 
 __all__ = [
     'API',
@@ -45,5 +48,7 @@ __all__ = [
     'MongoJSONEncoder',
     'mongo_json_dumps',
     'serialize_mongo_types',
+    'get_state',
+    'set_state',
 ]
 

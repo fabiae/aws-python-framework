@@ -6,6 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any
 import logging
 
+from ..context.state import set_state
 from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
 from ..database.external_mongo_manager import ExternalMongoManager
@@ -154,7 +155,12 @@ class Lambda(ABC):
             Exception: Any error during validation or processing
         """
         try:
-            
+            # Step 0: Setup constitution-state context
+            state = self.event.get('constitution-state')
+            if not state:
+                raise ValueError("'constitution-state' is required in the event")
+            set_state(state)
+
             # Step 1: Validate
             await self.validate()
             # Step 2: Process

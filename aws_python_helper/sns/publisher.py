@@ -11,6 +11,8 @@ from typing import Dict, Any, List, Optional, Union
 import boto3
 from abc import ABC
 
+from ..context.state import get_state
+
 
 class SNSPublisher(ABC):
     """
@@ -251,10 +253,18 @@ class SNSPublisher(ABC):
         content = message.get("content")
         if not content:
             raise ValueError("Message content is required")
-        
+
         content = self._serialize_message(content)
         attributes = message.get("attributes")
         subject = message.get("subject")
+
+        # Auto-inject constitution-state as a message attribute
+        current_state = get_state()
+        if current_state:
+            if not attributes:
+                attributes = {}
+            if 'constitution-state' not in attributes:
+                attributes['constitution-state'] = current_state
 
         params = {
             'Id': str(index),

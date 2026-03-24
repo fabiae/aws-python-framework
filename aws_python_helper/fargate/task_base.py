@@ -10,6 +10,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any
 
+from ..context.state import set_state
 from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
 from ..database.external_mongo_manager import ExternalMongoManager
@@ -153,6 +154,10 @@ class FargateTask(ABC):
             True if executed successfully, False otherwise
         """
         try:
+            # Setup constitution-state context from env var (passed by FargateExecutor)
+            state = self.require_env("CONSTITUTION_STATE")
+            set_state(state)
+
             await self.execute()
             return True
             
