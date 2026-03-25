@@ -9,7 +9,7 @@ Mini-framework to create REST APIs, SQS Consumers, SNS Publishers, Fargate Tasks
 - **OOP structure**: Object-oriented programming for your code
 - **Flexible MongoDB**: Direct access to multiple databases without models
 - **External MongoDB**: Connect to multiple MongoDB clusters simultaneously
-- **Multi-state routing**: Automatic `constitution-state` propagation across the entire call chain for per-state database routing
+- **Session propagation**: Automatic `Session` (state + user) propagation across the entire call chain for per-state database routing
 - **SQS Consumers**: Same pattern to process SQS messages (single or batch mode)
 - **SNS Publishers**: Same pattern to publish messages to SNS topics
 - **Fargate Tasks**: Same pattern to run tasks in Fargate containers
@@ -42,8 +42,9 @@ All available classes and functions:
 | `FargateExecutor` | `aws_python_helper.fargate.executor` | Launches Fargate tasks from Lambda |
 | `fargate_handler` | `aws_python_helper.fargate.handler` | Entry point handler for Fargate |
 | `Repository` | `aws_python_helper.repository.base` | Base class for MongoDB repositories |
-| `get_state` | `aws_python_helper` | Read the current constitution-state from async context |
-| `set_state` | `aws_python_helper` | Set the current constitution-state in async context |
+| `Session` | `aws_python_helper` | Request-scoped session object (state + user) |
+| `get_session` | `aws_python_helper` | Read the current Session from async context |
+| `set_session` | `aws_python_helper` | Set the current Session in async context |
 | `MongoJSONEncoder` | `aws_python_helper.utils.json_encoder` | JSON encoder for MongoDB types |
 | `mongo_json_dumps` | `aws_python_helper.utils.json_encoder` | Helper to serialize MongoDB types |
 | `serialize_mongo_types` | `aws_python_helper.utils.serializer` | Recursively serialize MongoDB types |
@@ -252,7 +253,7 @@ response = lambda_client.invoke(
     FunctionName='GenerateRouteLambda',
     InvocationType='RequestResponse',
     Payload=json.dumps({
-        'constitution-state': 'connecticut',  # Required
+        'session': {'state': 'connecticut'},  # Required
         'data': {
             'shipping_id': '507f1f77bcf86cd799439011'
         }
@@ -276,7 +277,7 @@ lambda_client.invoke(
     FunctionName='GenerateRouteLambda',
     InvocationType='Event',  # Asynchronous
     Payload=json.dumps({
-        'constitution-state': 'connecticut',  # Required
+        'session': {'state': 'connecticut'},  # Required
         'data': {
             'shipping_id': '507f1f77bcf86cd799439011'
         }
@@ -420,7 +421,7 @@ from aws_python_helper.fargate.executor import FargateExecutor
 
 def handler(event, context):
     executor = FargateExecutor()
-    # constitution-state is auto-propagated as CONSTITUTION_STATE env var in the container
+    # session is auto-propagated as SESSION env var (JSON) in the container
     task_arn = executor.run_task(
         'search-tax-by-town',
         envs={'TOWN': 'Norwalk', 'ONLY_TAX': 'true'}
@@ -485,14 +486,14 @@ The framework provides a `Repository` base class that eliminates repetitive boil
 | Property | Type | Default | Required |
 |----------|------|---------|----------|
 | `collection_name` | `str` | — | **Yes** |
-| `database_key` | `str \| None` | `None` | No — if `None`, uses `constitution-state` from context |
+| `database_key` | `str \| None` | `None` | No — if `None`, uses `session.state` from context |
 | `is_external` | `bool` | `False` | No |
 | `cluster_name` | `str` | `None` | Only if `is_external=True` |
 | `indexes` | `list` | `[]` | No |
 
 **`database_key` controls how the database is resolved:**
 - `database_key = "core"` (or any string) → always connects to that specific database.
-- `database_key = None` (default) → reads `constitution-state` from the async context automatically. This makes the repository **state-scoped**: it connects to `"connecticut"`, `"new_jersey"`, etc. depending on the current request.
+- `database_key = None` (default) → reads `session.state` from context automatically. This makes the repository **state-scoped**: it connects to `"connecticut"`, `"new_jersey"`, etc. depending on the current request.
 
 Collections are cached per `(database_name, collection_name)` key — state-scoped repositories correctly isolate state between concurrent requests.
 
@@ -545,7 +546,7 @@ class TownsRepository(Repository):
 
 ### State-scoped repository (no `database_key`)
 
-When `database_key` is not set, the repository reads the current `constitution-state` from context and uses it as the database name. The same repository instance connects to `"connecticut"` for one request and to `"new_jersey"` for another — automatically.
+When `database_key` is not set, the repository reads `session.state` from context and uses it as the database name. The same repository instance connects to `"connecticut"` for one request and to `"new_jersey"` for another — automatically.
 
 ```python
 from aws_python_helper import Repository
@@ -556,9 +557,9 @@ class LandRecordsRepository(Repository):
     def collection_name(self):
         return "records"
 
-    # No database_key → uses get_state() automatically
-    # If constitution-state = "connecticut" → connects to DB "connecticut"
-    # If constitution-state = "new_jersey"  → connects to DB "new_jersey"
+    # No database_key → uses session.state automatically
+    # If session.state = "connecticut" → connects to DB "connecticut"
+    # If session.state = "new_jersey"  → connects to DB "new_jersey"
 
     @property
     def indexes(self):
@@ -577,7 +578,7 @@ class LandRecordsRepository(Repository):
         return {"upserted": result.upserted_count, "modified": result.modified_count}
 ```
 
-> **Note:** A `ValueError` is raised at runtime if `database_key` is `None` and `constitution-state` has not been set in the context. This is prevented automatically by the framework at every entry point (API, Lambda, SQS, Fargate).
+> **Note:** A `ValueError` is raised at runtime if `database_key` is `None` and `session.state` has not been set. This is prevented automatically by the framework at every entry point (API, Lambda, SQS, Fargate).
 
 ### Repository on an external cluster
 
@@ -627,42 +628,58 @@ class MyAPI(API):
 
 The repository connects itself using the already-initialized `MongoManager` singleton — the same one used by `self.db`. No need to pass `self.db` or any connection object.
 
-## 🌐 Constitution State
+## 🌐 Session Context
 
-The framework uses a `constitution-state` value to support **multi-state database routing** — connecting each request to the correct database based on the state it belongs to (e.g., `"connecticut"`, `"new_jersey"`). This value is propagated automatically across the entire async call chain using Python's `contextvars.ContextVar`, so you never need to pass it manually between layers.
+The framework propagates a `Session` object automatically across the entire async call chain using Python's `contextvars.ContextVar`. The session holds `state` (for multi-state DB routing) and `user` (authenticated user from the auth middleware).
 
 ### How the framework injects it at each entry point
 
-| Entry point | How `constitution-state` is read |
-|-------------|----------------------------------|
-| **API Gateway** | HTTP header `constitution-state` — **required**, returns `400` if missing |
-| **Standalone Lambda** | Field `constitution-state` in the event payload — **required**, raises `ValueError` if missing |
-| **SQS Consumer (single mode)** | Per-record: reads from SNS `MessageAttributes['constitution-state']`, falls back to `body.constitution_state` |
-| **SQS Consumer (batch mode)** | Groups records by state; calls `process_batch()` once per group with the correct state in context |
-| **Fargate Task** | Env var `CONSTITUTION_STATE` — auto-injected by `FargateExecutor` |
+| Entry point | How the session is read |
+|-------------|-------------------------|
+| **API Gateway** | `constitution-state` header → `session.state` (when `AUTHORIZATION` includes `state`); auth middleware → `session.user` (when includes `user`). Returns `400` if required header is missing |
+| **Standalone Lambda** | `session` dict in the event payload — **required** (must include `state`), raises `ValueError` if missing |
+| **SQS Consumer (single mode)** | Per-record: reads `session` from SNS `MessageAttributes` (JSON), falls back to legacy `body.constitution_state` |
+| **SQS Consumer (batch mode)** | Groups records by `session.state`; calls `process_batch()` once per group with the correct session in context |
+| **Fargate Task** | `SESSION` env var (JSON) — auto-injected by `FargateExecutor` |
 
 ### How the framework propagates it to downstream services
 
 | Downstream service | Propagation mechanism |
 |--------------------|-----------------------|
-| **SNS Publisher** | Auto-injects `constitution-state` as a `MessageAttribute` on every published message |
-| **FargateExecutor** | Auto-injects `CONSTITUTION_STATE` as an env var when launching Fargate containers |
+| **SNS Publisher** | Auto-injects the full session as a `session` `MessageAttribute` (JSON string) on every published message |
+| **FargateExecutor** | Auto-injects `SESSION` as a JSON env var when launching Fargate containers |
 
-This means that an API call with `constitution-state: connecticut` will automatically carry that state through SNS → SQS → Fargate without any code changes in your consumers or tasks.
+This means that an API call with `constitution-state: connecticut` will automatically carry the full session (state + user) through SNS → SQS → Fargate without any code changes in your consumers or tasks.
+
+### Accessing the session in handlers
+
+All handler base classes expose a `self.session` property:
+
+```python
+class MyAPI(API):
+    async def process(self):
+        state = self.session.state   # e.g. "connecticut"
+        user  = self.session.user    # authenticated user dict, or None
+```
+
+Available in `API`, `SQSConsumer`, `Lambda`, and `FargateTask`.
 
 ### State-scoped repositories
 
-Repositories with no `database_key` (default) read `constitution-state` from context to resolve the target database automatically. See the [Repository Pattern](#️-repository-pattern) section for details.
+Repositories with no `database_key` (default) read `session.state` from context to resolve the target database automatically. See the [Repository Pattern](#️-repository-pattern) section for details.
 
 ### Manual access
 
-If you need to read or set the state manually (e.g., in tests or utility code):
+If you need to read or set the session manually (e.g., in tests or utility code):
 
 ```python
-from aws_python_helper import get_state, set_state
+from aws_python_helper import Session, get_session, set_session
 
-state = get_state()      # e.g. "connecticut", or None if not set
-set_state("new_jersey")  # set manually (the framework does this automatically)
+session = get_session()         # returns current Session (creates empty one if not set)
+session.state                   # e.g. "connecticut", or None if not set
+session.user                    # authenticated user dict, or None
+
+set_session(Session(state="new_jersey"))  # set manually (the framework does this automatically)
 ```
 
 ### API example — `constitution-state` header
@@ -673,7 +690,7 @@ constitution-state: connecticut
 Authorization: Bearer <token>
 ```
 
-### Lambda invocation example — `constitution-state` in event
+### Lambda invocation example — `session` in event
 
 ```python
 import boto3, json
@@ -683,7 +700,7 @@ lambda_client.invoke(
     FunctionName='MyLambdaFunction',
     InvocationType='RequestResponse',
     Payload=json.dumps({
-        'constitution-state': 'connecticut',   # Required
+        'session': {'state': 'connecticut'},  # Required
         'data': {'key': 'value'}
     })
 )
@@ -724,6 +741,7 @@ All properties and methods available inside an `API` subclass:
 | `self.query_parameters` | `dict` | Query string parameters |
 | `self.db` | `DatabaseProxy` | Access to main MongoDB cluster |
 | `self.external_db` | `ExternalDatabaseProxy` | Access to external MongoDB clusters |
+| `self.session` | `Session` | Request-scoped session (`session.state`, `session.user`) |
 | `self.current_user` | `dict \| None` | Authenticated user document (requires `REQUIRE_AUTH=true`) |
 | `self.is_authenticated` | `bool` | Whether the request is authenticated |
 | `self.auth_data` | `dict \| None` | Full authentication data |
@@ -772,14 +790,14 @@ The framework includes a built-in token-based authentication middleware.
 ### Configuration
 
 ```bash
-REQUIRE_AUTH=true            # Enable authentication (default: false)
+AUTHORIZATION=full           # Authorization mode: 'user', 'state', or 'full' (default: empty/disabled)
 AUTH_DB_NAME=my_database     # MongoDB database where tokens are stored
 AUTH_BYPASS_TOKEN=secret123  # Master token to bypass auth (for internal use)
 ```
 
 ### Using the authenticated user
 
-When `REQUIRE_AUTH=true`, every request must include a valid `Authorization: Bearer <token>` header. The authenticated user is available via `self.current_user`:
+When `AUTHORIZATION` is `user` or `full`, every request must include a valid `Authorization: Bearer <token>` header. The authenticated user is available via `self.current_user`:
 
 ```python
 class OrderListAPI(API):

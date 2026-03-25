@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any
 import logging
 
-from ..context.state import set_state
+from ..context.session import Session, set_session, get_session
 from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
 from ..database.external_mongo_manager import ExternalMongoManager
@@ -36,6 +36,15 @@ class Lambda(ABC):
         self._db = None
         self._external_db = None
     
+    @property
+    def session(self) -> Session:
+        """
+        Request-scoped session with state, user, and extensible properties.
+
+        Populated automatically from the event's 'session' field.
+        """
+        return get_session()
+
     @property
     def data(self) -> Dict[str, Any]:
         """
@@ -155,11 +164,12 @@ class Lambda(ABC):
             Exception: Any error during validation or processing
         """
         try:
-            # Step 0: Setup constitution-state context
-            state = self.event.get('constitution-state')
-            if not state:
-                raise ValueError("'constitution-state' is required in the event")
-            set_state(state)
+            # Step 0: Setup session context
+            session_data = self.event.get('session')
+            if not session_data or not session_data.get('state'):
+                raise ValueError("'session' with 'state' is required in the event")
+            session = Session.from_dict(session_data)
+            set_session(session)
 
             # Step 1: Validate
             await self.validate()

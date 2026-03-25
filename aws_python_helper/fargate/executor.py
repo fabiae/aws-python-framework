@@ -10,7 +10,8 @@ import logging
 import boto3
 from typing import Dict, Any, List, Optional
 
-from ..context.state import get_state
+import json
+from ..context.session import get_session
 
 
 logger = logging.getLogger(__name__)
@@ -121,10 +122,15 @@ class FargateExecutor:
                 for key, value in envs.items()
             ]
 
-            # Auto-propagate constitution-state from current context
-            current_state = get_state()
-            if current_state and 'CONSTITUTION_STATE' not in {e['name'] for e in environment}:
-                environment.append({'name': 'CONSTITUTION_STATE', 'value': current_state})
+            # Auto-propagate session from current context
+            session = get_session()
+            session_dict = session.to_dict()
+            if session_dict and 'SESSION' not in {e['name'] for e in environment}:
+                from ..utils.json_encoder import MongoJSONEncoder
+                environment.append({
+                    'name': 'SESSION',
+                    'value': json.dumps(session_dict, cls=MongoJSONEncoder, ensure_ascii=False)
+                })
 
             # Add TASK_NAME for the handler to know which task to execute
             environment.append({'name': 'TASK_NAME', 'value': task_name})

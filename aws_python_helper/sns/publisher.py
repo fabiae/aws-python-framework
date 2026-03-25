@@ -11,7 +11,7 @@ from typing import Dict, Any, List, Optional, Union
 import boto3
 from abc import ABC
 
-from ..context.state import get_state
+from ..context.session import get_session
 
 
 class SNSPublisher(ABC):
@@ -258,13 +258,14 @@ class SNSPublisher(ABC):
         attributes = message.get("attributes")
         subject = message.get("subject")
 
-        # Auto-inject constitution-state as a message attribute
-        current_state = get_state()
-        if current_state:
+        # Auto-inject session as a message attribute
+        session = get_session()
+        session_dict = session.to_dict()
+        if session_dict:
             if not attributes:
                 attributes = {}
-            if 'constitution-state' not in attributes:
-                attributes['constitution-state'] = current_state
+            if 'session' not in attributes:
+                attributes['session'] = self._serialize_message(session_dict)
 
         params = {
             'Id': str(index),

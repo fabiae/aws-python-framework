@@ -10,7 +10,8 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Any
 
-from ..context.state import set_state
+import json
+from ..context.session import Session, set_session, get_session
 from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
 from ..database.external_mongo_manager import ExternalMongoManager
@@ -43,6 +44,16 @@ class FargateTask(ABC):
         self._db = None
         self._external_db = None
         
+    @property
+    def session(self) -> Session:
+        """
+        Request-scoped session with state, user, and extensible properties.
+
+        Populated automatically from the SESSION environment variable
+        passed by FargateExecutor.
+        """
+        return get_session()
+
     @property
     def db(self):
         """
@@ -154,9 +165,10 @@ class FargateTask(ABC):
             True if executed successfully, False otherwise
         """
         try:
-            # Setup constitution-state context from env var (passed by FargateExecutor)
-            state = self.require_env("CONSTITUTION_STATE")
-            set_state(state)
+            # Setup session context from env var (passed by FargateExecutor)
+            session_json = self.require_env("SESSION")
+            session = Session.from_dict(json.loads(session_json))
+            set_session(session)
 
             await self.execute()
             return True

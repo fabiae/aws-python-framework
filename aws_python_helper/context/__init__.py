@@ -1,3 +1,3 @@
-from .state import get_state, set_state
+from .session import Session, get_session, set_session
 
-__all__ = ['get_state', 'set_state']
+__all__ = ['Session', 'get_session', 'set_session']

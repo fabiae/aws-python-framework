@@ -8,7 +8,7 @@ from typing import Dict, Any, List, Optional
 import logging
 import json
 
-from ..context.state import set_state
+from ..context.session import Session, get_session, set_session
 from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
 from ..database.external_mongo_manager import ExternalMongoManager
@@ -99,10 +99,19 @@ class SQSConsumer(ABC):
         return "single"
     
     @property
+    def session(self) -> Session:
+        """
+        Request-scoped session with state, user, and extensible properties.
+
+        Populated automatically from the SQS message attributes.
+        """
+        return get_session()
+
+    @property
     def db(self):
         """
         Access to MongoDB databases (main cluster)
-        
+
         Usage:
             result = await self.db.users_db.users.find_one({'_id': user_id})
         """
@@ -264,18 +273,19 @@ class SQSConsumer(ABC):
         else:
             self.logger.error(f"Message {message_id} marked as failed")
     
-    def _extract_state(self, record: Dict[str, Any]) -> Optional[str]:
+    def _extract_session(self, record: Dict[str, Any]) -> Optional[Session]:
         """
-        Extract constitution-state from an SQS record without setting it in the context.
+        Extract Session from an SQS record without setting it in the context.
 
-        Looks first in SNS MessageAttributes (injected automatically by SNSPublisher),
-        then falls back to the parsed message body content.
+        Looks first in SNS MessageAttributes for 'session' (injected automatically
+        by SNSPublisher), then falls back to the parsed message body content for
+        legacy 'constitution_state' field.
 
         Args:
             record: SQS record
 
         Returns:
-            The state string if found, None otherwise
+            Session instance if found, None otherwise
         """
         # Primary: SNS MessageAttributes (auto-injected by SNSPublisher)
         raw_body = record.get('body', '{}')
@@ -288,29 +298,36 @@ class SQSConsumer(ABC):
             raw_body_json = raw_body or {}
 
         if isinstance(raw_body_json, dict) and 'MessageAttributes' in raw_body_json:
-            state_attr = raw_body_json['MessageAttributes'].get('constitution-state', {})
-            state = state_attr.get('Value')
-            if state:
-                return state
+            # Try full session attribute first
+            session_attr = raw_body_json['MessageAttributes'].get('session', {})
+            session_str = session_attr.get('Value')
+            if session_str:
+                try:
+                    return Session.from_dict(json.loads(session_str))
+                except (json.JSONDecodeError, TypeError):
+                    self.logger.warning(f"Could not parse session attribute: {session_str}")
 
         # Fallback: parsed body content (for direct SQS messages without SNS wrapping)
         body = self.extract_content_message(record)
-        return body.get("constitution_state") or body.get("content", {}).get("constitution_state")
+        state = body.get("constitution_state") or body.get("content", {}).get("constitution_state")
+        if state:
+            return Session(state=state)
+        return None
 
-    def _extract_and_set_state(self, record: Dict[str, Any]) -> Optional[str]:
+    def _extract_and_set_session(self, record: Dict[str, Any]) -> Optional[Session]:
         """
-        Extract constitution-state from an SQS record and set it in the context.
+        Extract Session from an SQS record and set it in the context.
 
         Args:
             record: SQS record
 
         Returns:
-            The state string if found, None otherwise
+            Session instance if found, None otherwise
         """
-        state = self._extract_state(record)
-        if state:
-            set_state(state)
-        return state
+        session = self._extract_session(record)
+        if session:
+            set_session(session)
+        return session
 
     async def _process_batch_internal(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
@@ -376,8 +393,8 @@ class SQSConsumer(ABC):
         """
         Wrapper for batch mode processing with automatic error handling.
 
-        Groups records by constitution-state so that each call to process_batch()
-        has the correct state set in context. This ensures that repositories
+        Groups records by session state so that each call to process_batch()
+        has the correct session set in context. This ensures that repositories
         resolve to the right database even when a batch contains records from
         different states (e.g. connecticut + new_jersey in the same SQS batch).
 
@@ -385,15 +402,19 @@ class SQSConsumer(ABC):
         """
         all_results = []
 
-        # Group records by constitution-state
+        # Group records by session state
         state_groups: Dict[Optional[str], List[Dict[str, Any]]] = {}
+        session_by_state: Dict[Optional[str], Session] = {}
         for record in records:
-            state = self._extract_state(record)
+            session = self._extract_session(record)
+            state = session.state if session else None
             state_groups.setdefault(state, []).append(record)
+            if state and state not in session_by_state and session:
+                session_by_state[state] = session
 
         for state, group_records in state_groups.items():
-            if state:
-                set_state(state)
+            if state and state in session_by_state:
+                set_session(session_by_state[state])
 
             self._failed_messages = []  # reset per state group
 
@@ -450,8 +471,8 @@ class SQSConsumer(ABC):
             message_id = record.get('messageId', f'record-{i}')
 
             try:
-                # Auto-extract and set constitution-state for this record
-                self._extract_and_set_state(record)
+                # Auto-extract and set session for this record
+                self._extract_and_set_session(record)
 
                 self.logger.info(f"Processing message: {message_id}")
                 await self.process_record(record)

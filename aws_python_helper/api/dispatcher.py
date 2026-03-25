@@ -12,7 +12,7 @@ from .base import API
 from .exceptions import UnauthorizedError, ForbiddenError, AuthenticationError
 from .auth_middleware import AuthMiddleware
 from .auth_validators import TokenValidator
-from ..context.state import set_state
+from ..context.session import get_session
 
 logger = logging.getLogger(__name__)
 
@@ -75,23 +75,34 @@ class Dispatcher:
             # 1. Prepare - Load controller and inject properties
             api = self._prepare()
             
-            # 2. Authenticate (if required)
-            require_auth = os.getenv('REQUIRE_AUTH', 'false').lower() == 'true'
-            if require_auth:
+            # 2. Authorization based on mode
+            authorization = os.getenv('AUTHORIZATION', '').lower()
+            requires_user = authorization in ('user', 'full')
+            requires_state = authorization in ('state', 'full')
+
+            # 2a. Authenticate (if mode requires user)
+            if requires_user:
                 await self._authenticate(api)
 
-            # 2.5 Setup constitution-state context
-            state = self.headers.get('constitution-state')
-            if not state:
-                return {
-                    'code': 400,
-                    'body': {
-                        'error': 'Bad Request',
-                        'message': "Header 'constitution-state' is required"
-                    },
-                    'headers': {}
-                }
-            set_state(state)
+            # 2b. Validate state header (if mode requires state)
+            if requires_state:
+                state = self.headers.get('constitution-state')
+                if not state:
+                    return {
+                        'code': 400,
+                        'body': {
+                            'error': 'Bad Request',
+                            'message': "Header 'constitution-state' is required"
+                        },
+                        'headers': {}
+                    }
+                session = get_session()
+                session.state = state
+
+            # 2c. Inject user into session (if authenticated)
+            if api._current_user:
+                session = get_session()
+                session.user = api._current_user
 
             # 3. Validate
             await api.validate()

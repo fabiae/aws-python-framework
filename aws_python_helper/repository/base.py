@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..database.mongo_manager import MongoManager
 from ..database.external_mongo_manager import ExternalMongoManager
-from ..context.state import get_state
+from ..context.session import get_session
 
 
 class Repository(ABC):
@@ -30,7 +30,7 @@ class Repository(ABC):
     Optional properties to override:
         database_key (str | None): Explicit database name to use.
             - If set (e.g., 'core', 'smart_data'): always uses that database.
-            - If None (default): uses the constitution-state contextvar automatically.
+            - If None (default): uses session.state automatically.
               This makes the repository "state-scoped" — it connects to the database
               matching the current request state (e.g., 'connecticut', 'new_jersey').
         is_external (bool): Whether to use an external MongoDB cluster. Default: False.
@@ -59,13 +59,13 @@ class Repository(ABC):
             async def get_all(self):
                 return await self.collection.find({}).to_list(length=None)
 
-        # State-scoped repository — connects to the current constitution-state database
+        # State-scoped repository — connects to the current session state database
         class LandRecordsRepository(Repository):
 
             @property
             def collection_name(self):
                 return "land_records"
-            # No database_key → uses get_state() automatically
+            # No database_key → uses session.state automatically
 
         # External cluster repository
         class AddressRepository(Repository):
@@ -107,7 +107,7 @@ class Repository(ABC):
         Explicit database name to use.
 
         - If set (e.g., 'core', 'smart_data'): always connects to that database.
-        - If None (default): uses the current constitution-state contextvar,
+        - If None (default): uses the current session state,
           making this repository state-scoped (different database per request state).
         """
         return None
@@ -117,22 +117,22 @@ class Repository(ABC):
         """
         Resolved database name.
 
-        Uses database_key if set. Otherwise reads the current constitution-state
-        from the contextvar (set automatically by the framework at every entry point).
+        Uses database_key if set. Otherwise reads the current session state
+        (set automatically by the framework at every entry point).
 
         Raises:
-            ValueError: If database_key is None and constitution-state is not set in context.
+            ValueError: If database_key is None and session state is not set.
         """
         if self.database_key is not None:
             return self.database_key
 
-        state = get_state()
-        if not state:
+        session = get_session()
+        if not session or not session.state:
             raise ValueError(
-                f"{self.__class__.__name__}: 'constitution-state' is required but not set in context. "
-                f"Set database_key to a fixed value, or ensure constitution-state is passed in the request."
+                f"{self.__class__.__name__}: 'state' is required in session but not set. "
+                f"Set database_key to a fixed value, or ensure session is initialized."
             )
-        return state
+        return session.state
 
     @property
     def is_external(self) -> bool:
@@ -177,7 +177,7 @@ class Repository(ABC):
         Resolves the collection from MongoManager (main cluster) or
         ExternalMongoManager (external cluster) based on is_external.
         The database is resolved via database_name (which reads database_key
-        or the constitution-state contextvar).
+        or the session state).
 
         Collections are cached per (database_name, collection_name) key,
         so state-scoped repositories resolve the correct collection for each

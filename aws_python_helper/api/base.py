@@ -9,6 +9,7 @@ from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
 from ..database.external_mongo_manager import ExternalMongoManager
 from ..database.external_database_proxy import ExternalDatabaseProxy
+from ..context.session import get_session
 
 
 class API(ABC):
@@ -137,16 +138,30 @@ class API(ABC):
         return self._external_db
     
     @property
+    def session(self):
+        """
+        Request-scoped session with state, user, and extensible properties.
+
+        Populated automatically by the dispatcher from the request headers
+        and authentication middleware.
+
+        Usage:
+            state = self.session.state          # constitution-state
+            user = self.session.user            # authenticated user dict
+        """
+        return get_session()
+
+    @property
     def current_user(self) -> Optional[Dict[str, Any]]:
         """
         Current authenticated user or None if not authenticated
-        
+
         This property is populated by the authentication middleware
-        when REQUIRE_AUTH=true.
-        
+        when AUTHORIZATION is 'user' or 'full'.
+
         Returns:
             Dict with user data (email, role, name, etc.) or None
-        
+
         Example:
             if self.is_authenticated:
                 user_email = self.current_user['email']
