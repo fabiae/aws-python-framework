@@ -7,6 +7,7 @@ without complex validations, only basic JSON serialization.
 
 import json
 import logging
+import base64
 from typing import Dict, Any, List, Optional, Union
 import boto3
 from abc import ABC
@@ -185,14 +186,27 @@ class SNSPublisher(ABC):
 
         params['PublishBatchRequestEntries'] = message_to_publish
 
-        result = self.sns_client.publish_batch(**params)
+        try:
+            result = self.sns_client.publish_batch(**params)
+        except Exception as e:
+            self.logger.error(f"Error calling publish_batch to {self.topic_arn}: {e}")
+            raise
 
-        for message in result['Successful']:
+        for message in result.get('Successful', []):
             message_ids_success.append(message['MessageId'])
 
-        for message in result['Failed']:
+        for message in result.get('Failed', []):
+            self.logger.error(
+                f"Failed to publish message {message.get('Id')} to {self.topic_arn}: "
+                f"Code={message.get('Code')}, Message={message.get('Message')}"
+            )
             message_ids_failed.append(None)
-        
+
+        self.logger.info(
+            f"Batch publish to {self.topic_arn}: "
+            f"{len(message_ids_success)} successful, {len(message_ids_failed)} failed"
+        )
+
         return message_ids_success, message_ids_failed
     
     def _serialize_message(self, content: Dict[str, Any]) -> str:
@@ -258,14 +272,16 @@ class SNSPublisher(ABC):
         attributes = message.get("attributes")
         subject = message.get("subject")
 
-        # Auto-inject session as a message attribute
+        # Auto-inject session as a message attribute (Base64-encoded to avoid
+        # SNS filter policy issues with JSON string values)
         session = get_session()
         session_dict = session.to_dict()
         if session_dict:
             if not attributes:
                 attributes = {}
             if 'session' not in attributes:
-                attributes['session'] = self._serialize_message(session_dict)
+                session_json = self._serialize_message(session_dict)
+                attributes['session'] = base64.b64encode(session_json.encode('utf-8')).decode('utf-8')
 
         params = {
             'Id': str(index),

@@ -13,6 +13,7 @@ from .exceptions import UnauthorizedError, ForbiddenError, AuthenticationError
 from .auth_middleware import AuthMiddleware
 from .auth_validators import TokenValidator
 from ..context.session import get_session
+from ..context.state_validator import StateValidator, InvalidStateError
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,17 @@ class Dispatcher:
                         'body': {
                             'error': 'Bad Request',
                             'message': "Header 'constitution-state' is required"
+                        },
+                        'headers': {}
+                    }
+                try:
+                    await StateValidator.validate(state)
+                except InvalidStateError as e:
+                    return {
+                        'code': 403,
+                        'body': {
+                            'error': 'Forbidden',
+                            'message': str(e)
                         },
                         'headers': {}
                     }

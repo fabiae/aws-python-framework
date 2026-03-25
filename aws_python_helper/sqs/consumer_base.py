@@ -3,6 +3,7 @@ SQS Consumer Base - Base class for all SQS consumers
 """
 
 import os
+import base64
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
 import logging
@@ -277,9 +278,8 @@ class SQSConsumer(ABC):
         """
         Extract Session from an SQS record without setting it in the context.
 
-        Looks first in SNS MessageAttributes for 'session' (injected automatically
-        by SNSPublisher), then falls back to the parsed message body content for
-        legacy 'constitution_state' field.
+        Looks in SNS MessageAttributes for 'session' (Base64-encoded, injected
+        automatically by SNSPublisher).
 
         Args:
             record: SQS record
@@ -287,7 +287,6 @@ class SQSConsumer(ABC):
         Returns:
             Session instance if found, None otherwise
         """
-        # Primary: SNS MessageAttributes (auto-injected by SNSPublisher)
         raw_body = record.get('body', '{}')
         if isinstance(raw_body, str):
             try:
@@ -298,20 +297,14 @@ class SQSConsumer(ABC):
             raw_body_json = raw_body or {}
 
         if isinstance(raw_body_json, dict) and 'MessageAttributes' in raw_body_json:
-            # Try full session attribute first
             session_attr = raw_body_json['MessageAttributes'].get('session', {})
             session_str = session_attr.get('Value')
             if session_str:
                 try:
-                    return Session.from_dict(json.loads(session_str))
-                except (json.JSONDecodeError, TypeError):
+                    decoded = base64.b64decode(session_str).decode('utf-8')
+                    return Session.from_dict(json.loads(decoded))
+                except (json.JSONDecodeError, TypeError, Exception) as e:
                     self.logger.warning(f"Could not parse session attribute: {session_str}")
-
-        # Fallback: parsed body content (for direct SQS messages without SNS wrapping)
-        body = self.extract_content_message(record)
-        state = body.get("constitution_state") or body.get("content", {}).get("constitution_state")
-        if state:
-            return Session(state=state)
         return None
 
     def _extract_and_set_session(self, record: Dict[str, Any]) -> Optional[Session]:

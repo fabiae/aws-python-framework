@@ -7,6 +7,7 @@ from typing import Dict, Any
 import logging
 
 from ..context.session import Session, set_session, get_session
+from ..context.state_validator import StateValidator
 from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
 from ..database.external_mongo_manager import ExternalMongoManager
@@ -169,6 +170,7 @@ class Lambda(ABC):
             if not session_data or not session_data.get('state'):
                 raise ValueError("'session' with 'state' is required in the event")
             session = Session.from_dict(session_data)
+            await StateValidator.validate(session.state)
             set_session(session)
 
             # Step 1: Validate

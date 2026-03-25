@@ -638,7 +638,7 @@ The framework propagates a `Session` object automatically across the entire asyn
 |-------------|-------------------------|
 | **API Gateway** | `constitution-state` header → `session.state` (when `AUTHORIZATION` includes `state`); auth middleware → `session.user` (when includes `user`). Returns `400` if required header is missing |
 | **Standalone Lambda** | `session` dict in the event payload — **required** (must include `state`), raises `ValueError` if missing |
-| **SQS Consumer (single mode)** | Per-record: reads `session` from SNS `MessageAttributes` (JSON), falls back to legacy `body.constitution_state` |
+| **SQS Consumer (single mode)** | Per-record: reads `session` from SNS `MessageAttributes` (Base64-encoded JSON) |
 | **SQS Consumer (batch mode)** | Groups records by `session.state`; calls `process_batch()` once per group with the correct session in context |
 | **Fargate Task** | `SESSION` env var (JSON) — auto-injected by `FargateExecutor` |
 
@@ -646,7 +646,7 @@ The framework propagates a `Session` object automatically across the entire asyn
 
 | Downstream service | Propagation mechanism |
 |--------------------|-----------------------|
-| **SNS Publisher** | Auto-injects the full session as a `session` `MessageAttribute` (JSON string) on every published message |
+| **SNS Publisher** | Auto-injects the full session as a `session` `MessageAttribute` (Base64-encoded JSON) on every published message |
 | **FargateExecutor** | Auto-injects `SESSION` as a JSON env var when launching Fargate containers |
 
 This means that an API call with `constitution-state: connecticut` will automatically carry the full session (state + user) through SNS → SQS → Fargate without any code changes in your consumers or tasks.
@@ -1112,7 +1112,7 @@ environment_variables = {
 By default, consumers process messages one by one (`"single"` mode). Use `"batch"` mode when you need to group or bulk-process messages.
 
 **Constitution-state handling in SQS:**
-- **Single mode**: the framework extracts `constitution-state` from each record automatically (from SNS `MessageAttributes`, then from `body.constitution_state`) and sets it in context before calling `process_record()`. You do not need to extract it yourself.
+- **Single mode**: the framework extracts the session from each record automatically (from SNS `MessageAttributes`, Base64-decoded) and sets it in context before calling `process_record()`. You do not need to extract it yourself.
 - **Batch mode**: the framework groups the incoming records by `constitution-state` and calls `process_batch()` once per group, with the correct state in context for each group. This ensures that state-scoped repositories resolve to the right database even when a batch contains records from different states.
 
 ```python
@@ -1162,7 +1162,7 @@ class OrderConsumer(SQSConsumer):
 
 ### SNS Publisher - Batch Publishing
 
-The `SNSPublisher` automatically injects the current `constitution-state` as a `MessageAttribute` on every published message. SQS consumers built with this framework will then extract it automatically, ensuring the state flows end-to-end through the SNS → SQS chain without any manual code.
+The `SNSPublisher` automatically injects the current session as a Base64-encoded `MessageAttribute` on every published message. Base64 encoding is used to avoid SNS filter policy issues with raw JSON string values in attributes. SQS consumers built with this framework will decode it automatically, ensuring the session flows end-to-end through the SNS → SQS chain without any manual code.
 
 ```python
 topic = TitleIndexedTopic()

@@ -29,6 +29,7 @@ from .repository.base import Repository
 
 # Context
 from .context.session import Session, get_session, set_session
+from .context.state_validator import StateValidator, InvalidStateError
 
 
 __all__ = [
@@ -51,5 +52,7 @@ __all__ = [
     'Session',
     'get_session',
     'set_session',
+    'StateValidator',
+    'InvalidStateError',
 ]
 
