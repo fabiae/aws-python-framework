@@ -31,6 +31,17 @@ from .repository.base import Repository
 from .context.session import Session, get_session, set_session
 from .context.state_validator import StateValidator, InvalidStateError
 
+# Invoker
+from .invoker import (
+    LambdaInvoker,
+    ApiClient,
+    LambdaInvocationError,
+    LambdaResponseError,
+    ServiceNotConfiguredError,
+    ApiClientError,
+    ApiResponseError,
+)
+
 
 __all__ = [
     'API',
@@ -54,5 +65,12 @@ __all__ = [
     'set_session',
     'StateValidator',
     'InvalidStateError',
+    'LambdaInvoker',
+    'ApiClient',
+    'LambdaInvocationError',
+    'LambdaResponseError',
+    'ServiceNotConfiguredError',
+    'ApiClientError',
+    'ApiResponseError',
 ]
 

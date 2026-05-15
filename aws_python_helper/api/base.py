@@ -266,10 +266,26 @@ class API(ABC):
             'headers': self._response_headers
         }
     
+    @property
+    def schema(self):
+        """
+        Optional Pydantic model class for automatic request validation.
+
+        Override this property to return a BaseModel subclass.
+        The dispatcher will validate self.data against it before calling validate(),
+        replace self.data with the coerced model output, and return 400 on failure.
+
+        Example:
+            @property
+            def schema(self):
+                return MyRequestSchema
+        """
+        return None
+
     async def validate(self):
         """
         Hook for data validation
-        
+
         Override this method to implement custom validations.
         If the validation fails, raise an exception.
         """

@@ -36,6 +36,7 @@ class Lambda(ABC):
         self.logger = logging.getLogger(self.__class__.__name__)
         self._db = None
         self._external_db = None
+        self._data_override = None
     
     @property
     def session(self) -> Session:
@@ -47,17 +48,37 @@ class Lambda(ABC):
         return get_session()
 
     @property
+    def schema(self):
+        """
+        Optional Pydantic model class for automatic input validation.
+
+        Override this property to return a BaseModel subclass.
+        The run() method will validate self.data against it before calling validate(),
+        and replace self.data with the coerced model output.
+
+        Example:
+            @property
+            def schema(self):
+                return MyInputSchema
+        """
+        return None
+
+    @property
     def data(self) -> Dict[str, Any]:
         """
         Access to event data
-        
+
         Supports both formats:
         - {'data': {...}} -> returns the nested data
         - {...} -> returns the entire event
-        
+
+        After schema validation (if schema is defined), returns the coerced output.
+
         Returns:
             Data from the event
         """
+        if self._data_override is not None:
+            return self._data_override
         if 'data' in self.event:
             return self.event['data']
         return self.event
@@ -173,12 +194,21 @@ class Lambda(ABC):
             await StateValidator.validate(session.state)
             set_session(session)
 
-            # Step 1: Validate
+            # Step 1: Schema validation (automatic, if schema property is defined)
+            if self.schema is not None:
+                try:
+                    validated = self.schema(**self.data)
+                    self._data_override = validated.model_dump()
+                except Exception as e:
+                    raise ValueError(str(e))
+
+            # Step 2: Validate
             await self.validate()
-            # Step 2: Process
+
+            # Step 3: Process
             result = await self.process()
-            
-            # Step 3: Return result
+
+            # Step 4: Return result
             return {
                 'success': True,
                 'data': result

@@ -15,6 +15,9 @@ Mini-framework to create REST APIs, SQS Consumers, SNS Publishers, Fargate Tasks
 - **Fargate Tasks**: Same pattern to run tasks in Fargate containers
 - **Standalone Lambdas**: Create lambdas invocable directly with AWS SDK
 - **Authentication middleware**: Built-in token-based authentication
+- **Pydantic schema validation**: Declare a `schema` property on any `API` or `Lambda` and the framework validates automatically before `validate()` — returns 400 on failure
+- **LambdaInvoker**: Invoke other Lambda functions (sync or async) with built-in error handling
+- **ApiClient**: HTTP client for inter-service communication — resolves service URLs and auth token from environment variables automatically
 - **JSON utilities**: Automatic serialization of MongoDB types
 - **Type hints**: Modern Python with type annotations
 - **Async/await**: Full support for asynchronous operations
@@ -42,6 +45,13 @@ All available classes and functions:
 | `FargateExecutor` | `aws_python_helper.fargate.executor` | Launches Fargate tasks from Lambda |
 | `fargate_handler` | `aws_python_helper.fargate.handler` | Entry point handler for Fargate |
 | `Repository` | `aws_python_helper.repository.base` | Base class for MongoDB repositories |
+| `LambdaInvoker` | `aws_python_helper` | Invoke Lambda functions (sync/async) with error handling |
+| `ApiClient` | `aws_python_helper` | HTTP client for inter-service communication |
+| `LambdaInvocationError` | `aws_python_helper` | Raised when boto3 fails to invoke a Lambda |
+| `LambdaResponseError` | `aws_python_helper` | Raised when a Lambda returns a FunctionError |
+| `ServiceNotConfiguredError` | `aws_python_helper` | Raised when a service name is not in MICROSERVICE_URLS |
+| `ApiClientError` | `aws_python_helper` | Raised when an HTTP request fails (network/timeout) |
+| `ApiResponseError` | `aws_python_helper` | Raised when a remote API returns 4xx/5xx |
 | `Session` | `aws_python_helper` | Request-scoped session object (state + user) |
 | `get_session` | `aws_python_helper` | Read the current Session from async context |
 | `set_session` | `aws_python_helper` | Set the current Session in async context |
@@ -879,19 +889,21 @@ Here's a complete example showing how an API can invoke a standalone lambda:
 **1. The API endpoint** (`src/api/shippings/post.py`):
 
 ```python
-from aws_python_helper.api.base import API
-import boto3
-import json
+from pydantic import BaseModel
+from aws_python_helper import API, LambdaInvoker
+
+class ShippingSchema(BaseModel):
+    customer_id: str
+    address: str
+    items: list[str]
 
 class ShippingPostAPI(API):
-    async def validate(self):
-        required_fields = ['customer_id', 'address', 'items']
-        for field in required_fields:
-            if field not in self.data:
-                raise ValueError(f"{field} is required")
+
+    @property
+    def schema(self):
+        return ShippingSchema  # automatic validation → 400 on failure
 
     async def process(self):
-        # Create shipping in database
         shipping = {
             'customer_id': self.data['customer_id'],
             'address': self.data['address'],
@@ -903,15 +915,11 @@ class ShippingPostAPI(API):
         result = await self.db.deliveries.shippings.insert_one(shipping)
         shipping_id = str(result.inserted_id)
 
-        # Invoke standalone lambda asynchronously to generate route
-        lambda_client = boto3.client('lambda')
-        lambda_client.invoke(
-            FunctionName='GenerateRouteLambda',
-            InvocationType='Event',  # Asynchronous
-            Payload=json.dumps({
-                'data': {'shipping_id': shipping_id}
-            })
-        )
+        # Invoke standalone lambda asynchronously (fire-and-forget)
+        invoker = LambdaInvoker()
+        invoker.invoke_async('GenerateRouteLambda', payload={
+            'data': {'shipping_id': shipping_id}
+        })
 
         self.set_code(201)
         self.set_body({
@@ -989,6 +997,152 @@ __all__ = ['generate_route_handler']
 - Decoupled services (easier to maintain)
 - Can retry lambda independently if it fails
 - Scalable architecture
+
+## ✅ Pydantic Schema Validation
+
+The framework supports automatic request validation via [Pydantic](https://docs.pydantic.dev/) v2. Override the `schema` property on any `API` or `Lambda` subclass to declare the expected shape of `self.data`. The framework validates before calling `validate()` and replaces `self.data` with the coerced output — the property name stays the same.
+
+### In an API endpoint
+
+For `POST`/`PUT`, `self.data` is the request body. For `GET`/`LIST`, it is the query parameters. Both are validated the same way.
+
+```python
+from pydantic import BaseModel
+from aws_python_helper import API
+
+class SearchSchema(BaseModel):
+    keys: list[str]
+    state: str
+    limit: int = 100
+
+class SearchPostAPI(API):
+
+    @property
+    def schema(self):
+        return SearchSchema  # ← that's all
+
+    async def process(self):
+        keys  = self.data["keys"]   # self.data is validated and coerced
+        limit = self.data["limit"]  # default applied by Pydantic
+        ...
+```
+
+**On validation failure the framework automatically returns HTTP 400** — no extra code needed.
+
+### In a Standalone Lambda
+
+Same property, same behavior. On failure a `ValueError` is raised, which the handler returns as `{"success": False, "error": "..."}`.
+
+```python
+from pydantic import BaseModel
+from aws_python_helper import Lambda
+
+class SyncSchema(BaseModel):
+    shipping_id: str
+    carrier_id: str
+
+class SyncCarrierLambda(Lambda):
+
+    @property
+    def schema(self):
+        return SyncSchema
+
+    async def process(self):
+        shipping_id = self.data["shipping_id"]  # validated
+        ...
+```
+
+### Without a schema
+
+If `schema` is not overridden (returns `None`, the default), the behavior is identical to before — no change.
+
+---
+
+## 🔗 Inter-Service Communication
+
+The framework provides two utilities for calling other services: `LambdaInvoker` for direct Lambda invocations and `ApiClient` for HTTP API calls.
+
+### LambdaInvoker
+
+Wraps `boto3` Lambda invocations with proper error handling. Never returns `None` — raises typed exceptions instead.
+
+```python
+from aws_python_helper import LambdaInvoker, LambdaInvocationError, LambdaResponseError
+
+invoker = LambdaInvoker()
+
+# Synchronous — waits for result
+result = invoker.invoke("my-function-name", payload={"key": "value"})
+# result is the parsed dict returned by the Lambda
+
+# Asynchronous fire-and-forget
+invoker.invoke_async("my-function-name", payload={"key": "value"})
+```
+
+**Exceptions:**
+
+| Exception | When |
+|-----------|------|
+| `LambdaInvocationError` | boto3 could not reach the function (network, permissions, etc.) |
+| `LambdaResponseError` | The function itself raised an unhandled exception (`FunctionError` in the response) |
+
+**Note:** `boto3` is part of the AWS Lambda Python runtime — no installation needed. For Fargate containers, add `boto3` to your `requirements.txt`.
+
+### ApiClient
+
+HTTP client for service-to-service calls. Resolves the target URL and auth token automatically from environment variables — no hardcoded URLs or tokens in code.
+
+```python
+from aws_python_helper import ApiClient
+
+client = ApiClient("dockets")                               # service name only
+result = await client.post("/search", body={"keys": [...]})
+result = await client.get("/dockets/123")
+result = await client.list("/dockets", params={"state": "CT"})
+result = await client.put("/dockets/123", body={"status": "active"})
+result = await client.patch("/dockets/123", body={"reviewed": True})
+result = await client.delete("/dockets/123")
+
+# Extra headers merged with the defaults (token is always injected automatically)
+client = ApiClient("dockets", headers={"constitution-state": "CT"})
+```
+
+**How URL and token are resolved:**
+
+| Env var | Purpose |
+|---------|---------|
+| `MICROSERVICE_URLS` | JSON map: `{"dockets": "https://api.example.com/", "title-search": "https://..."}` |
+| `INTER_SERVICE_TOKEN` | Bearer token injected as `Authorization: Bearer <token>` |
+| `AUTH_BYPASS_TOKEN` | Fallback if `INTER_SERVICE_TOKEN` is not set |
+
+**Exceptions:**
+
+| Exception | When |
+|-----------|------|
+| `ServiceNotConfiguredError` | Service name not found in `MICROSERVICE_URLS` |
+| `ApiClientError` | Network error or timeout |
+| `ApiResponseError` | Remote API returned 4xx or 5xx (has `.status_code` and `.response_body` attributes) |
+
+**Terraform configuration** — set once per environment in Secrets Manager with keys `inter_service_token` and `microservice_urls`. The Lambda and Fargate modules pick them up automatically from infrastructure outputs; no extra variables needed in resource files beyond passing them through:
+
+```hcl
+# In AWS Secrets Manager secret (JSON):
+# {
+#   "inter_service_token": "my-secret-token",
+#   "microservice_urls": "{\"dockets\": \"https://api-dockets.execute-api.us-east-2.amazonaws.com/\"}",
+#   ...
+# }
+
+# In Terraform module call (already handled by the modules):
+module "my_lambda" {
+  source              = "../modules/lambda"
+  inter_service_token = data.terraform_remote_state.infrastructure.outputs.inter_service_token
+  microservice_urls   = data.terraform_remote_state.infrastructure.outputs.microservice_urls
+  ...
+}
+```
+
+---
 
 ## 🏗️ Architecture Overview
 
@@ -1096,6 +1250,8 @@ environment_variables = {
 | `REQUIRE_AUTH` | Optional | Enable authentication middleware (`true`/`false`) |
 | `AUTH_DB_NAME` | If `REQUIRE_AUTH=true` | MongoDB database for token validation |
 | `AUTH_BYPASS_TOKEN` | Optional | Master token to bypass authentication |
+| `INTER_SERVICE_TOKEN` | Optional | Bearer token for `ApiClient` service-to-service calls |
+| `MICROSERVICE_URLS` | Optional | JSON map of service name → base URL used by `ApiClient` |
 | `ECS_CLUSTER` | Fargate only | ECS cluster name for `FargateExecutor` |
 | `ECS_SUBNETS` | Fargate only | Comma-separated subnet IDs for Fargate tasks |
 | `CONSTITUTION_STATE` | Fargate only (auto) | State injected automatically by `FargateExecutor` — do not set manually |

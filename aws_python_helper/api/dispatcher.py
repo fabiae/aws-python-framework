@@ -116,10 +116,18 @@ class Dispatcher:
                 session = get_session()
                 session.user = api._current_user
 
-            # 3. Validate
+            # 3. Schema validation (automatic, if schema property is defined)
+            if api.schema is not None:
+                try:
+                    validated = api.schema(**api.data)
+                    api.data = validated.model_dump()
+                except Exception as e:
+                    raise ValueError(str(e))
+
+            # 4. Validate
             await api.validate()
-            
-            # 4. Process
+
+            # 5. Process
             await api.process()
             
             # 5. If no code was set, use 200 by default
