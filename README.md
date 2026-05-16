@@ -18,6 +18,7 @@ Mini-framework to create REST APIs, SQS Consumers, SNS Publishers, Fargate Tasks
 - **Pydantic schema validation**: Declare a `schema` property on any `API` or `Lambda` and the framework validates automatically before `validate()` — returns 400 on failure
 - **LambdaInvoker**: Invoke other Lambda functions (sync or async) with built-in error handling
 - **ApiClient**: HTTP client for inter-service communication — resolves service URLs and auth token from environment variables automatically
+- **ModelQueryLambda**: Base class for MongoDB query-proxy Lambdas — declare an `allowed_collections` whitelist and the framework handles `find` and `aggregate` operations generically
 - **JSON utilities**: Automatic serialization of MongoDB types
 - **Type hints**: Modern Python with type annotations
 - **Async/await**: Full support for asynchronous operations
@@ -45,6 +46,7 @@ All available classes and functions:
 | `FargateExecutor` | `aws_python_helper.fargate.executor` | Launches Fargate tasks from Lambda |
 | `fargate_handler` | `aws_python_helper.fargate.handler` | Entry point handler for Fargate |
 | `Repository` | `aws_python_helper.repository.base` | Base class for MongoDB repositories |
+| `ModelQueryLambda` | `aws_python_helper` | Generic MongoDB query-proxy Lambda base class |
 | `LambdaInvoker` | `aws_python_helper` | Invoke Lambda functions (sync/async) with error handling |
 | `ApiClient` | `aws_python_helper` | HTTP client for inter-service communication |
 | `LambdaInvocationError` | `aws_python_helper` | Raised when boto3 fails to invoke a Lambda |
@@ -1141,6 +1143,144 @@ module "my_lambda" {
   ...
 }
 ```
+
+---
+
+## 🔍 ModelQueryLambda
+
+`ModelQueryLambda` is a ready-to-use base class for creating MongoDB query-proxy Lambdas. Instead of writing a custom Lambda every time another microservice needs to read data from your MongoDB, you subclass `ModelQueryLambda`, declare an `allowed_collections` whitelist, and the framework exposes both `find` and `aggregate` operations automatically.
+
+**Use case:** microservice A needs to query data owned by microservice B. Microservice B deploys one `model-query` Lambda; microservice A calls it via `LambdaInvoker` passing the collection name and query parameters.
+
+### Creating a model-query Lambda
+
+Create `src/lambda/model-query/main.py` in the microservice that owns the data:
+
+```python
+from aws_python_helper import ModelQueryLambda
+
+class ModelQueryLambda(ModelQueryLambda):
+
+    @property
+    def allowed_collections(self) -> list:
+        return ["orders", "customers"]  # whitelist — unlisted collections are rejected
+```
+
+Register the handler in `src/handlers/lambda_handler.py`:
+
+```python
+from aws_python_helper.lambda_standalone.handler import lambda_handler
+
+model_query_handler = lambda_handler('model-query')
+
+__all__ = ["model_query_handler"]
+```
+
+### Query modes
+
+#### Aggregate pipeline
+
+Pass a `pipeline` list to run a MongoDB aggregation:
+
+```python
+invoker.invoke("ServiceModelQuery-dev", payload={
+    "session": self.session.to_dict(),
+    "collection": "orders",
+    "pipeline": [
+        {"$match": {"status": "pending"}},
+        {"$sort": {"created_at": -1}},
+        {"$limit": 50},
+    ],
+})
+```
+
+#### Find with filter
+
+Pass `filter`, `fields`, `limit`, and/or `skip` to run a `find`:
+
+```python
+invoker.invoke("ServiceModelQuery-dev", payload={
+    "session": self.session.to_dict(),
+    "collection": "orders",
+    "filter": {"customer_id": "abc123", "status": "active"},
+    "fields": {"_id": 1, "total": 1, "status": 1},  # projection
+    "limit": 20,
+    "skip": 0,
+})
+```
+
+**Note:** `pipeline` and `fields` are mutually exclusive — the framework rejects payloads that include both.
+
+### Payload reference
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `session` | `dict` | Yes | Session dict from `self.session.to_dict()` — drives state-scoped DB routing |
+| `collection` | `str` | Yes | Collection name (must be in `allowed_collections`) |
+| `pipeline` | `list` | One of | MongoDB aggregation pipeline |
+| `filter` | `dict` | One of | MongoDB filter document (defaults to `{}`) |
+| `fields` | `dict` | No | MongoDB projection (only valid with `filter` mode) |
+| `limit` | `int` | No | Max documents to return |
+| `skip` | `int` | No | Documents to skip (default `0`) |
+
+### Response format
+
+The Lambda always returns the standard framework envelope:
+
+```json
+{
+  "success": true,
+  "data": [ ... ]
+}
+```
+
+On validation error (unknown collection, invalid payload):
+
+```json
+{
+  "success": false,
+  "error": "Collection 'unknown' is not allowed. Allowed: orders, customers"
+}
+```
+
+### Calling it from another microservice
+
+```python
+import os
+from aws_python_helper import LambdaInvoker, LambdaInvocationError
+
+class OrdersPostAPI(API):
+
+    async def process(self):
+        try:
+            response = LambdaInvoker().invoke(
+                os.getenv("ORDERS_MODEL_QUERY_LAMBDA_NAME"),
+                payload={
+                    "session": self.session.to_dict(),
+                    "collection": "orders",
+                    "filter": {"status": "pending"},
+                    "limit": 100,
+                },
+            )
+        except LambdaInvocationError as e:
+            self.logger.error(f"model-query invocation failed: {e}")
+            raise ValueError("Could not retrieve orders. Please try again later.")
+
+        if not response.get("success"):
+            raise ValueError("Could not retrieve orders. Please try again later.")
+
+        orders = response.get("data", [])
+        self.set_body({"orders": orders})
+```
+
+### Session and database routing
+
+The `session` field in the payload is required. The `ModelQueryLambda` uses `session.state` to resolve the target database — the same state-scoped routing used by all framework components. This means:
+
+- `{"session": {"state": "connecticut"}, ...}` → queries the `connecticut` database
+- `{"session": {"state": "new_jersey"}, ...}` → queries the `new_jersey` database
+
+Always pass `self.session.to_dict()` when calling from an API or Lambda to ensure state propagates correctly.
 
 ---
 
