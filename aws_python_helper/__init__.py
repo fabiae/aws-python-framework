@@ -31,6 +31,9 @@ from .repository.base import Repository
 from .context.session import Session, get_session, set_session
 from .context.state_validator import StateValidator, InvalidStateError
 
+# Model Query
+from .model_query import ModelQueryLambda
+
 # Invoker
 from .invoker import (
     LambdaInvoker,
@@ -65,6 +68,7 @@ __all__ = [
     'set_session',
     'StateValidator',
     'InvalidStateError',
+    'ModelQueryLambda',
     'LambdaInvoker',
     'ApiClient',
     'LambdaInvocationError',
