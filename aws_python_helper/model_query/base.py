@@ -30,13 +30,51 @@ Response (via Lambda base run()):
 """
 
 from typing import Any, List, Optional
+from bson import ObjectId
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from ..lambda_standalone.base import Lambda
 
 
+_OBJECT_ID_SCALAR_OPERATORS = {"$eq", "$ne", "$gt", "$gte", "$lt", "$lte"}
+_OBJECT_ID_LIST_OPERATORS = {"$in", "$nin"}
+
+
+def _coerce_object_id(value: Any) -> Any:
+    """Convert a string (or operator dict) to ObjectId where applicable for an '_id' field."""
+    if isinstance(value, ObjectId):
+        return value
+    if isinstance(value, str):
+        if not ObjectId.is_valid(value):
+            raise ValueError(f"'_id' value '{value}' is not a valid ObjectId")
+        return ObjectId(value)
+    if isinstance(value, dict):
+        coerced = {}
+        for op, op_value in value.items():
+            if op in _OBJECT_ID_LIST_OPERATORS:
+                if not isinstance(op_value, list):
+                    raise ValueError(f"'{op}' value for '_id' must be a list")
+                coerced[op] = [_coerce_object_id(v) for v in op_value]
+            elif op in _OBJECT_ID_SCALAR_OPERATORS:
+                coerced[op] = _coerce_object_id(op_value)
+            else:
+                coerced[op] = op_value
+        return coerced
+    raise ValueError(
+        f"Unsupported type for '_id' filter: {type(value).__name__}"
+    )
+
+
+def _normalize_id_key(d: dict) -> None:
+    """Rename 'id' → '_id' (if no _id present) and coerce its value to ObjectId in-place."""
+    if "id" in d and "_id" not in d:
+        d["_id"] = d.pop("id")
+    if "_id" in d:
+        d["_id"] = _coerce_object_id(d["_id"])
+
+
 class _ModelQuerySchema(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
 
     collection: str
     filter: Optional[dict] = None
@@ -49,6 +87,16 @@ class _ModelQuerySchema(BaseModel):
     def _pipeline_fields_exclusive(self):
         if self.pipeline is not None and self.fields is not None:
             raise ValueError("'fields' cannot be used together with 'pipeline'")
+        return self
+
+    @model_validator(mode="after")
+    def _normalize_object_ids(self):
+        if self.filter is not None:
+            _normalize_id_key(self.filter)
+        if self.pipeline is not None:
+            for stage in self.pipeline:
+                if isinstance(stage, dict) and isinstance(stage.get("$match"), dict):
+                    _normalize_id_key(stage["$match"])
         return self
 
 
