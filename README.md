@@ -1211,6 +1211,35 @@ invoker.invoke("ServiceModelQuery-dev", payload={
 
 **Note:** `pipeline` and `fields` are mutually exclusive — the framework rejects payloads that include both.
 
+#### Querying by `_id`
+
+ObjectId hex strings in `_id` filters are automatically coerced to `ObjectId` so callers can serialize queries as plain JSON:
+
+```python
+# Plain value
+invoker.invoke("ServiceModelQuery-dev", payload={
+    "session": self.session.to_dict(),
+    "collection": "orders",
+    "filter": {"_id": "65f1a2b3c4d5e6f7a8b9c0d1"},
+})
+
+# Operator with list
+invoker.invoke("ServiceModelQuery-dev", payload={
+    "session": self.session.to_dict(),
+    "collection": "orders",
+    "filter": {"_id": {"$in": ["65f1...", "65f2...", "65f3..."]}},
+})
+
+# 'id' is accepted as an alias for '_id'
+invoker.invoke("ServiceModelQuery-dev", payload={
+    "session": self.session.to_dict(),
+    "collection": "orders",
+    "filter": {"id": "65f1a2b3c4d5e6f7a8b9c0d1"},
+})
+```
+
+Supported operators on `_id`: scalar (`$eq`, `$ne`, `$gt`, `$gte`, `$lt`, `$lte`) and list (`$in`, `$nin`). The same coercion is applied to `$match` stages inside a `pipeline`. If the string is not a valid 24-char ObjectId hex, the Lambda raises a clear validation error.
+
 ### Payload reference
 
 | Field | Type | Required | Description |
@@ -1218,7 +1247,7 @@ invoker.invoke("ServiceModelQuery-dev", payload={
 | `session` | `dict` | Yes | Session dict from `self.session.to_dict()` — drives state-scoped DB routing |
 | `collection` | `str` | Yes | Collection name (must be in `allowed_collections`) |
 | `pipeline` | `list` | One of | MongoDB aggregation pipeline |
-| `filter` | `dict` | One of | MongoDB filter document (defaults to `{}`) |
+| `filter` | `dict` | One of | MongoDB filter document (defaults to `{}`). `_id`/`id` string values are auto-coerced to `ObjectId` |
 | `fields` | `dict` | No | MongoDB projection (only valid with `filter` mode) |
 | `limit` | `int` | No | Max documents to return |
 | `skip` | `int` | No | Documents to skip (default `0`) |

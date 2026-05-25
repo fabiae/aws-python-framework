@@ -25,6 +25,17 @@ Caller payload:
         "skip":     0                             # optional, default 0
     }
 
+ObjectId coercion:
+    String values for '_id' (or 'id' as alias) inside `filter` and pipeline
+    `$match` stages are automatically converted to bson.ObjectId. Supports
+    scalar operators ($eq, $ne, $gt, $gte, $lt, $lte) and list operators
+    ($in, $nin). A clear ValueError is raised when the string is not a valid
+    24-char ObjectId hex.
+
+    {"filter": {"_id": "65f1a2b3c4d5e6f7a8b9c0d1"}}
+    {"filter": {"_id": {"$in": ["65f1...", "65f2..."]}}}
+    {"filter": {"id":  "65f1a2b3c4d5e6f7a8b9c0d1"}}  # 'id' is aliased to '_id'
+
 Response (via Lambda base run()):
     {"success": True, "data": [...]}
 """
