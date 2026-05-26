@@ -6,6 +6,7 @@ from typing import Any, Dict
 import boto3
 
 from .exceptions import LambdaInvocationError, LambdaResponseError
+from ..utils.json_encoder import MongoJSONEncoder
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +59,7 @@ class LambdaInvoker:
             response = self._boto_client.invoke(
                 FunctionName=function_name,
                 InvocationType="RequestResponse",
-                Payload=json.dumps(payload),
+                Payload=json.dumps(payload, cls=MongoJSONEncoder),
             )
         except Exception as exc:
             logger.error("Failed to invoke lambda %s: %s", function_name, exc)
@@ -86,7 +87,7 @@ class LambdaInvoker:
             self._boto_client.invoke(
                 FunctionName=function_name,
                 InvocationType="Event",
-                Payload=json.dumps(payload),
+                Payload=json.dumps(payload, cls=MongoJSONEncoder),
             )
             logger.info("Async invocation dispatched to %s", function_name)
         except Exception as exc:
