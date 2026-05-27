@@ -98,9 +98,10 @@ class FargateTaskFetcher:
         task_class = None
         for item_name in dir(module):
             item = getattr(module, item_name)
-            if (isinstance(item, type) and 
-                hasattr(item, 'execute') and 
-                item.__name__ not in ['FargateTask', 'ABC']):
+            if (isinstance(item, type) and
+                hasattr(item, 'execute') and
+                item.__name__ not in ['FargateTask', 'ABC'] and
+                item.__module__ == module.__name__):
                 task_class = item
                 break
         

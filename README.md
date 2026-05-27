@@ -19,6 +19,7 @@ Mini-framework to create REST APIs, SQS Consumers, SNS Publishers, Fargate Tasks
 - **LambdaInvoker**: Invoke other Lambda functions (sync or async) with built-in error handling
 - **ApiClient**: HTTP client for inter-service communication — resolves service URLs and auth token from environment variables automatically
 - **ModelQueryLambda**: Base class for MongoDB query-proxy Lambdas — declare an `allowed_collections` whitelist and the framework handles `find` and `aggregate` operations generically
+- **ModelIndexSyncLambda**: Base class for index-synchronization Lambdas — declare your `repositories` and the framework creates every declared index across the `core` database and all active state databases, idempotently, in a single run (run once per deploy)
 - **JSON utilities**: Automatic serialization of MongoDB types
 - **Type hints**: Modern Python with type annotations
 - **Async/await**: Full support for asynchronous operations
@@ -47,6 +48,7 @@ All available classes and functions:
 | `fargate_handler` | `aws_python_helper.fargate.handler` | Entry point handler for Fargate |
 | `Repository` | `aws_python_helper.repository.base` | Base class for MongoDB repositories |
 | `ModelQueryLambda` | `aws_python_helper` | Generic MongoDB query-proxy Lambda base class |
+| `ModelIndexSyncLambda` | `aws_python_helper` | Index-sync Lambda base class (creates indexes across `core` + all state DBs) |
 | `LambdaInvoker` | `aws_python_helper` | Invoke Lambda functions (sync/async) with error handling |
 | `ApiClient` | `aws_python_helper` | HTTP client for inter-service communication |
 | `LambdaInvocationError` | `aws_python_helper` | Raised when boto3 fails to invoke a Lambda |
@@ -57,6 +59,8 @@ All available classes and functions:
 | `Session` | `aws_python_helper` | Request-scoped session object (state + user) |
 | `get_session` | `aws_python_helper` | Read the current Session from async context |
 | `set_session` | `aws_python_helper` | Set the current Session in async context |
+| `StateValidator` | `aws_python_helper` | Validates a state against `core.states` (cached, active states only) |
+| `InvalidStateError` | `aws_python_helper` | Raised when a state is not found or not active |
 | `MongoJSONEncoder` | `aws_python_helper.utils.json_encoder` | JSON encoder for MongoDB types |
 | `mongo_json_dumps` | `aws_python_helper.utils.json_encoder` | Helper to serialize MongoDB types |
 | `serialize_mongo_types` | `aws_python_helper.utils.serializer` | Recursively serialize MongoDB types |
@@ -229,6 +233,15 @@ class GenerateRouteLambda(Lambda):
             'shipping_id': shipping_id
         }
 ```
+
+> **`requires_state` (session requirement)** — By default (`requires_state = True`) the framework requires the event to carry a `session` with a valid `state` and validates it against `core.states` before running. Override `requires_state` to return `False` for Lambdas that operate across **all** states and must not be tied to a single one (e.g. index synchronization) — the `session`/`state` then becomes optional. See [ModelIndexSyncLambda](#-modelindexsynclambda).
+>
+> ```python
+> class SyncAllStatesLambda(Lambda):
+>     @property
+>     def requires_state(self) -> bool:
+>         return False  # no session.state required; runs across every state
+> ```
 
 **2. Configure the handler** in `src/handlers/lambda_handler.py`:
 
@@ -491,7 +504,9 @@ class AddressAPI(API):
 
 ## 🗂️ Repository Pattern
 
-The framework provides a `Repository` base class that eliminates repetitive boilerplate in data access layers. Each repository only declares what collection it uses, whether it belongs to an external cluster, and what indexes to create. The base class handles the MongoDB connection and index creation automatically.
+The framework provides a `Repository` base class that eliminates repetitive boilerplate in data access layers. Each repository only declares what collection it uses, whether it belongs to an external cluster, and what indexes it needs. The base class handles the MongoDB connection automatically.
+
+> **Index creation is not triggered at request time.** Declaring `indexes` only *describes* the indexes; it does not create them on collection access (this avoids per-request overhead and half-finished index builds in short-lived Lambda/API runtimes). Indexes are created by the [`ModelIndexSyncLambda`](#-modelindexsynclambda) — run once per deploy — or by calling `await repo.ensure_indexes()` explicitly.
 
 ### Properties to override
 
@@ -522,7 +537,15 @@ def indexes(self):
     ]
 ```
 
-Indexes are created automatically in the background on first collection access — no need to call any initialization method.
+These definitions are consumed by `ensure_indexes()`, which the [`ModelIndexSyncLambda`](#-modelindexsynclambda) runs across the relevant databases at deploy time. `ensure_indexes()` is idempotent (safe to re-run) and accepts an explicit `database_name` so the same state-scoped repository can be materialized in every state database:
+
+```python
+# Create this repository's indexes in a specific database (what the index-sync Lambda does):
+await repo.ensure_indexes(database_name="connecticut")
+
+# Or, with no argument, in the repository's resolved database (database_key or session.state):
+await repo.ensure_indexes()
+```
 
 ### Repository with a fixed database
 
@@ -649,7 +672,7 @@ The framework propagates a `Session` object automatically across the entire asyn
 | Entry point | How the session is read |
 |-------------|-------------------------|
 | **API Gateway** | `constitution-state` header → `session.state` (when `AUTHORIZATION` includes `state`); auth middleware → `session.user` (when includes `user`). Returns `400` if required header is missing |
-| **Standalone Lambda** | `session` dict in the event payload — **required** (must include `state`), raises `ValueError` if missing |
+| **Standalone Lambda** | `session` dict in the event payload — **required by default** (must include `state`), raises `ValueError` if missing. A Lambda can opt out via `requires_state = False` (e.g. `ModelIndexSyncLambda`), making the session optional |
 | **SQS Consumer (single mode)** | Per-record: reads `session` from SNS `MessageAttributes` (Base64-encoded JSON) |
 | **SQS Consumer (batch mode)** | Groups records by `session.state`; calls `process_batch()` once per group with the correct session in context |
 | **Fargate Task** | `SESSION` env var (JSON) — auto-injected by `FargateExecutor` |
@@ -1159,12 +1182,14 @@ Create `src/lambda/model-query/main.py` in the microservice that owns the data:
 ```python
 from aws_python_helper import ModelQueryLambda
 
-class ModelQueryLambda(ModelQueryLambda):
+class OrdersModelQueryLambda(ModelQueryLambda):
 
     @property
     def allowed_collections(self) -> list:
         return ["orders", "customers"]  # whitelist — unlisted collections are rejected
 ```
+
+> **Class discovery:** name your subclass distinctly from the imported base (e.g. `OrdersModelQueryLambda`, not `ModelQueryLambda`). The framework loads the class **defined in the file** — not the imported base — so subclassing an imported concrete base (`ModelQueryLambda`, `ModelIndexSyncLambda`) works without name collisions.
 
 Register the handler in `src/handlers/lambda_handler.py`:
 
@@ -1310,6 +1335,114 @@ The `session` field in the payload is required. The `ModelQueryLambda` uses `ses
 - `{"session": {"state": "new_jersey"}, ...}` → queries the `new_jersey` database
 
 Always pass `self.session.to_dict()` when calling from an API or Lambda to ensure state propagates correctly.
+
+---
+
+## 🧱 ModelIndexSyncLambda
+
+`ModelIndexSyncLambda` is a ready-to-use base class for **creating all of a service's MongoDB indexes deterministically**, in one run. Because index creation is no longer triggered at request time (see the [Repository Pattern](#️-repository-pattern) note), this Lambda is the single source of truth for materializing indexes — typically invoked **once per deploy**.
+
+**Why:** in short-lived Lambda/API runtimes, creating indexes lazily on first access often never finishes (the function responds and freezes). This Lambda creates every declared index up front, `await`-ing each one, idempotently — and across **every** active state database, not just the one of the current request.
+
+### Creating an index-sync Lambda
+
+Create `src/lambda/model-index-sync/main.py` and declare which repositories to sync:
+
+```python
+import aws_python_helper
+
+from repositories.parcels import ParcelsRepository   # state-scoped (database_key = None)
+from repositories.users import UsersRepository       # core (database_key = "core")
+from repositories.tokens import TokensRepository     # core
+
+class OrdersModelIndexSyncLambda(aws_python_helper.ModelIndexSyncLambda):
+
+    @property
+    def repositories(self) -> list:
+        return [ParcelsRepository, UsersRepository, TokensRepository]
+```
+
+Register the handler in `src/handlers/lambda_handler.py`:
+
+```python
+from aws_python_helper.lambda_standalone.handler import lambda_handler
+
+index_sync_handler = lambda_handler('model-index-sync')
+
+__all__ = ["index_sync_handler"]
+```
+
+> Declare repositories **explicitly** (don't auto-discover) so the synced set is intentional. List your own collections; **external** repositories (`is_external = True`) belong to another cluster/service and are typically excluded.
+
+### How it routes each repository
+
+For every repository in the list, the Lambda decides where to create its indexes:
+
+| Repository kind | `database_key` | Target databases |
+|-----------------|----------------|------------------|
+| **Core / fixed** | `"core"` (or any string) | that single database |
+| **State-scoped** | `None` | **every active state**, read from `core.states` where `is_active = true` (e.g. `connecticut`, `new_jersey`, …) |
+
+A state-scoped collection such as `parcels` therefore gets its indexes created in `connecticut`, `new_jersey`, and any other active state — automatically. Creation is idempotent, so re-running it is safe.
+
+This Lambda sets `requires_state = False`: it is not tied to a single state and does not require a `session` in the event.
+
+### Response format
+
+```json
+{
+  "success": true,
+  "data": [
+    {"repository": "ParcelsRepository", "database": "connecticut", "collection": "parcels", "indexes": ["parcel_id_1", "..."]},
+    {"repository": "ParcelsRepository", "database": "new_jersey",  "collection": "parcels", "indexes": ["parcel_id_1", "..."]},
+    {"repository": "UsersRepository",   "database": "core",        "collection": "users",   "indexes": ["email_1"]}
+  ]
+}
+```
+
+### Properties to override / configure
+
+| Property | Default | Purpose |
+|----------|---------|---------|
+| `repositories` | `[]` | **Required.** List of `Repository` subclasses (the classes, not instances) to sync. Empty raises a validation error |
+| `states_database` | `"core"` | Database holding the states collection |
+| `states_collection` | `"states"` | Collection listing the states (filtered by `is_active = true`, field `name`) |
+| `requires_state` | `False` | Inherited override — the Lambda runs across all states, no session required |
+
+### Running it once per deploy (Terraform)
+
+Since deploys are applied manually with Terraform, attach an `aws_lambda_invocation` that runs **on every `apply`**, right after the function code is updated. `timestamp()` changes on every plan, so it always re-runs (creation is idempotent and also picks up any newly-activated state). The `postcondition` fails the `apply` if the sync reports `success = false` (the framework handler returns HTTP 200 with `success = false` on internal errors, so this check is required to surface failures):
+
+```hcl
+module "lambda" {
+  source         = "../../../../../modules/lambda"
+  function_name  = "${...service_name}${var.lambda_name}-${...env}"
+  source_handler = "handlers.lambda_handler.index_sync_handler"
+  timeout        = 300
+  memory_size    = 512
+  # ... mongo + vpc config (same as any other Lambda)
+}
+
+resource "aws_lambda_invocation" "sync_on_deploy" {
+  function_name = module.lambda.lambda_function_name
+  input         = jsonencode({ _invoked_at = timestamp() })  # always changes → always re-runs
+
+  depends_on = [module.lambda]                                # run after the code is updated
+
+  lifecycle {
+    postcondition {
+      condition     = try(jsondecode(self.result).success, false) == true
+      error_message = "Index sync failed during apply: ${self.result}"
+    }
+  }
+}
+```
+
+You can also invoke it manually at any time (e.g. after activating a new state without a code deploy):
+
+```bash
+aws lambda invoke --function-name MyServiceModelIndexSync-dev out.json
+```
 
 ---
 

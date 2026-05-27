@@ -6,7 +6,6 @@ collection access, and index creation without requiring the user to
 pass a database connection or call any initialization method.
 """
 
-import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Tuple
@@ -183,8 +182,9 @@ class Repository(ABC):
         so state-scoped repositories resolve the correct collection for each
         request state without cross-contamination between requests.
 
-        On first access for a given key, schedules index creation as a
-        background asyncio task so indexes are created without blocking the caller.
+        Index creation is NOT triggered here: indexes are created exclusively
+        by the index-sync Lambda (see ensure_indexes), so request-time access
+        carries no index-creation overhead.
         """
         key = (self.database_name, self.collection_name)
 
@@ -200,29 +200,45 @@ class Repository(ABC):
 
             self._collection_cache[key] = db[self.collection_name]
 
-            # Schedule index creation as a background task on the running event loop.
-            if self.indexes and not self._indexes_created.get(key):
-                try:
-                    asyncio.get_running_loop().create_task(self.ensure_indexes())
-                except RuntimeError:
-                    pass  # No running event loop (e.g. synchronous test context)
-
         return self._collection_cache[key]
 
-    async def ensure_indexes(self):
+    async def ensure_indexes(self, database_name: Optional[str] = None):
         """
-        Creates all indexes defined in the `indexes` property.
+        Creates all indexes defined in the `indexes` property, blocking until done.
 
-        Called automatically in background on first collection access.
-        Can also be called explicitly at the start of a method when index
-        creation must be guaranteed to complete before proceeding.
+        Args:
+            database_name: Target database to create the indexes in.
+                - If None (default): uses the resolved database_name
+                  (database_key or the current session state).
+                - If set: creates the indexes in that specific database. This is
+                  used by the index-sync Lambda to create the indexes of a
+                  state-scoped repository across every active state database
+                  (e.g. 'connecticut', 'new_jersey', ...).
 
-        Idempotent: safe to call multiple times, only runs once per (database, collection).
+        Index creation is no longer triggered automatically at request time;
+        call this explicitly (the index-sync Lambda does) to guarantee creation.
+
+        Idempotent per (database, collection): safe to call multiple times.
+
+        Returns:
+            List of created index names (as returned by create_index).
         """
-        key = (self.database_name, self.collection_name)
+        db_name = database_name or self.database_name
+        key = (db_name, self.collection_name)
         if self._indexes_created.get(key):
-            return
+            return []
 
+        if self.is_external:
+            if not self.cluster_name:
+                raise ValueError(
+                    f"{self.__class__.__name__}: 'cluster_name' is required when is_external=True"
+                )
+            db = ExternalMongoManager.get_database(self.cluster_name, db_name)
+        else:
+            db = MongoManager.get_database(db_name)
+        collection = db[self.collection_name]
+
+        created: List[str] = []
         for index_def in self.indexes:
             index_key = index_def.get("key")
             if not index_key:
@@ -231,9 +247,11 @@ class Repository(ABC):
             options = {k: v for k, v in index_def.items() if k != "key"}
             options.setdefault("background", True)
             try:
-                await self.collection.create_index(index_key, **options)
-                self.logger.debug(f"Index created: {index_key}")
+                name = await collection.create_index(index_key, **options)
+                created.append(name)
+                self.logger.debug(f"Index created on '{db_name}.{self.collection_name}': {index_key}")
             except Exception as e:
-                self.logger.error(f"Error creating index {index_key}: {e}")
+                self.logger.error(f"Error creating index {index_key} on '{db_name}': {e}")
 
         self._indexes_created[key] = True
+        return created

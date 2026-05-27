@@ -48,6 +48,21 @@ class Lambda(ABC):
         return get_session()
 
     @property
+    def requires_state(self) -> bool:
+        """
+        Whether this Lambda requires a valid 'state' in the session.
+
+        Default True: run() enforces that the event carries session.state and
+        validates it against core.states before processing.
+
+        Override to return False for Lambdas that operate across all states and
+        must not be tied to a single one (e.g. index synchronization). When
+        False, a session is still set if provided, but state is not required
+        nor validated.
+        """
+        return True
+
+    @property
     def schema(self):
         """
         Optional Pydantic model class for automatic input validation.
@@ -188,11 +203,15 @@ class Lambda(ABC):
         try:
             # Step 0: Setup session context
             session_data = self.event.get('session')
-            if not session_data or not session_data.get('state'):
-                raise ValueError("'session' with 'state' is required in the event")
-            session = Session.from_dict(session_data)
-            await StateValidator.validate(session.state)
-            set_session(session)
+            if self.requires_state:
+                if not session_data or not session_data.get('state'):
+                    raise ValueError("'session' with 'state' is required in the event")
+                session = Session.from_dict(session_data)
+                await StateValidator.validate(session.state)
+                set_session(session)
+            elif session_data:
+                # state not required, but honor a session if one was provided
+                set_session(Session.from_dict(session_data))
 
             # Step 1: Schema validation (automatic, if schema property is defined)
             if self.schema is not None:

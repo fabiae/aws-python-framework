@@ -2,7 +2,7 @@
 AWS Python Framework
 """
 
-__version__ = "0.1.0"
+__version__ = "1.0.2"
 
 # All classes
 from .api.base import API
@@ -33,6 +33,9 @@ from .context.state_validator import StateValidator, InvalidStateError
 
 # Model Query
 from .model_query import ModelQueryLambda
+
+# Model Index Sync
+from .model_index_sync import ModelIndexSyncLambda
 
 # Invoker
 from .invoker import (
@@ -69,6 +72,7 @@ __all__ = [
     'StateValidator',
     'InvalidStateError',
     'ModelQueryLambda',
+    'ModelIndexSyncLambda',
     'LambdaInvoker',
     'ApiClient',
     'LambdaInvocationError',

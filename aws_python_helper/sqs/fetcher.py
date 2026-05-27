@@ -91,9 +91,10 @@ class SQSFetcher:
         consumer_class = None
         for item_name in dir(module):
             item = getattr(module, item_name)
-            if (isinstance(item, type) and 
-                hasattr(item, 'process_record') and 
-                item.__name__ not in ['SQSConsumer', 'ABC']):
+            if (isinstance(item, type) and
+                hasattr(item, 'process_record') and
+                item.__name__ not in ['SQSConsumer', 'ABC'] and
+                item.__module__ == module.__name__):
                 consumer_class = item
                 break
         

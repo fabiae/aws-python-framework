@@ -28,8 +28,12 @@ your-project/
 │   │   │   └── main.py                    # GenerateRouteLambda
 │   │   ├── sync-carrier/
 │   │   │   └── main.py                    # SyncCarrierLambda
-│   │   └── process-payment/
-│   │       └── main.py                    # ProcessPaymentLambda
+│   │   ├── process-payment/
+│   │   │   └── main.py                    # ProcessPaymentLambda
+│   │   ├── model-query/                    # subclass of ModelQueryLambda (framework base)
+│   │   │   └── main.py
+│   │   └── model-index-sync/               # subclass of ModelIndexSyncLambda (framework base)
+│   │       └── main.py
 │   │
 │   ├── task/                              # Fargate Tasks (folders)
 │   │   ├── search-tax-by-town/
@@ -95,6 +99,15 @@ your-project/
 - Folders use **kebab-case** (consistent with tasks)
 - File is always `main.py`
 - Classes use **PascalCase + Lambda** suffix
+
+**Framework-provided Lambda bases** — two ready-to-use Standalone Lambdas follow the same convention; you only subclass them and declare a property:
+
+| Handler Name | Folder | Base class | You declare |
+|--------------|--------|------------|-------------|
+| `model-query` | `src/lambda/model-query/` | `ModelQueryLambda` | `allowed_collections` (whitelist) |
+| `model-index-sync` | `src/lambda/model-index-sync/` | `ModelIndexSyncLambda` | `repositories` (list to sync) |
+
+> Name the subclass distinctly from the imported base (e.g. `OrdersModelQueryLambda`, not `ModelQueryLambda`) — see the class-detection note below.
 
 ### Fargate Tasks
 
@@ -235,4 +248,4 @@ Handler: 'search-tax-by-town'
   
 - **Scalability**: If a consumer grows complex, you can convert it to a folder structure later without breaking the framework
 
-- **Class detection**: The framework automatically finds your class by checking for methods like `process()`, `process_record()`, or `execute()`
+- **Class detection**: The framework loads the class **defined in that file** that matches the component (inherits the base / has `process()`, `process_record()`, or `execute()`). Classes *imported* into the file are ignored, so you can safely subclass an imported concrete base (e.g. `ModelQueryLambda`, `ModelIndexSyncLambda`) without the loader picking up the base by mistake. Give your subclass a distinct name from the base.

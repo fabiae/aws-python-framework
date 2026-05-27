@@ -190,9 +190,10 @@ class Fetcher:
         controller_class = None
         for item_name in dir(module):
             item = getattr(module, item_name)
-            if (isinstance(item, type) and 
-                hasattr(item, 'process') and 
-                item.__name__ not in ['API', 'ABC']):
+            if (isinstance(item, type) and
+                hasattr(item, 'process') and
+                item.__name__ not in ['API', 'ABC'] and
+                item.__module__ == module.__name__):
                 controller_class = item
                 break
         
