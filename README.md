@@ -19,7 +19,7 @@ Mini-framework to create REST APIs, SQS Consumers, SNS Publishers, Fargate Tasks
 - **LambdaInvoker**: Invoke other Lambda functions (sync or async) with built-in error handling
 - **ApiClient**: HTTP client for inter-service communication — resolves service URLs and auth token from environment variables automatically
 - **ModelQueryLambda**: Base class for MongoDB query-proxy Lambdas — declare an `allowed_collections` whitelist and the framework handles `find` and `aggregate` operations generically
-- **ModelIndexSyncLambda**: Base class for index-synchronization Lambdas — declare your `repositories` and the framework creates every declared index across the `core` database and all active state databases, idempotently, in a single run (run once per deploy)
+- **ModelIndexSyncLambda**: Base class for index-synchronization Lambdas — declare your `repositories` and the framework creates the declared indexes **and prunes orphans** across the `core` database and all active state databases, idempotently and in parallel, in a single run (run once per deploy)
 - **JSON utilities**: Automatic serialization of MongoDB types
 - **Type hints**: Modern Python with type annotations
 - **Async/await**: Full support for asynchronous operations
@@ -48,7 +48,7 @@ All available classes and functions:
 | `fargate_handler` | `aws_python_helper.fargate.handler` | Entry point handler for Fargate |
 | `Repository` | `aws_python_helper.repository.base` | Base class for MongoDB repositories |
 | `ModelQueryLambda` | `aws_python_helper` | Generic MongoDB query-proxy Lambda base class |
-| `ModelIndexSyncLambda` | `aws_python_helper` | Index-sync Lambda base class (creates indexes across `core` + all state DBs) |
+| `ModelIndexSyncLambda` | `aws_python_helper` | Index-sync Lambda base class (creates declared indexes + prunes orphans across `core` + all state DBs, in parallel) |
 | `LambdaInvoker` | `aws_python_helper` | Invoke Lambda functions (sync/async) with error handling |
 | `ApiClient` | `aws_python_helper` | HTTP client for inter-service communication |
 | `LambdaInvocationError` | `aws_python_helper` | Raised when boto3 fails to invoke a Lambda |
@@ -1340,9 +1340,15 @@ Always pass `self.session.to_dict()` when calling from an API or Lambda to ensur
 
 ## 🧱 ModelIndexSyncLambda
 
-`ModelIndexSyncLambda` is a ready-to-use base class for **creating all of a service's MongoDB indexes deterministically**, in one run. Because index creation is no longer triggered at request time (see the [Repository Pattern](#️-repository-pattern) note), this Lambda is the single source of truth for materializing indexes — typically invoked **once per deploy**.
+`ModelIndexSyncLambda` is a ready-to-use base class for **synchronizing all of a service's MongoDB indexes deterministically**, in one run. Because index creation is no longer triggered at request time (see the [Repository Pattern](#️-repository-pattern) note), this Lambda is the single source of truth for materializing indexes — typically invoked **once per deploy**.
 
 **Why:** in short-lived Lambda/API runtimes, creating indexes lazily on first access often never finishes (the function responds and freezes). This Lambda creates every declared index up front, `await`-ing each one, idempotently — and across **every** active state database, not just the one of the current request.
+
+It does a **two-way sync** per collection: it creates the declared indexes **and prunes orphans** — any index present in MongoDB that is no longer declared in the repository's `indexes` is dropped (the default `_id_` index and special text/geo/hashed indexes are always preserved).
+
+> ⚠️ **Orphan pruning drops indexes not declared in code.** Indexes created out-of-band (by a DBA, Atlas, or another tool) that aren't in any repository's `indexes` will be removed on every run. Declare every index you want to keep.
+
+**Concurrency & fault tolerance:** each `(collection, database)` unit is synced **in parallel** (bounded by `max_concurrency`, default 10); index work *within* a unit stays sequential. A failure in one unit is **captured and isolated** — it never aborts the others, so a single broken collection doesn't stop the rest of the sync. The top-level response is always `success: true`; per-unit outcomes are reported in `results[].success`.
 
 ### Creating an index-sync Lambda
 
@@ -1389,14 +1395,20 @@ This Lambda sets `requires_state = False`: it is not tied to a single state and 
 
 ### Response format
 
+The top-level `success` is **always `true`** (a failing collection no longer aborts the run). Inspect `data.summary` for the OK/failed counts and `data.results[].success` for each unit; failed units include an `error` field.
+
 ```json
 {
   "success": true,
-  "data": [
-    {"repository": "ParcelsRepository", "database": "connecticut", "collection": "parcels", "indexes": ["parcel_id_1", "..."]},
-    {"repository": "ParcelsRepository", "database": "new_jersey",  "collection": "parcels", "indexes": ["parcel_id_1", "..."]},
-    {"repository": "UsersRepository",   "database": "core",        "collection": "users",   "indexes": ["email_1"]}
-  ]
+  "data": {
+    "summary": { "total": 4, "succeeded": 3, "failed": 1 },
+    "results": [
+      {"repository": "ParcelsRepository", "database": "connecticut", "collection": "parcels", "indexes": ["parcel_id_1", "..."], "orphan_indexes_dropped": ["old_field_1"], "success": true},
+      {"repository": "ParcelsRepository", "database": "new_jersey",  "collection": "parcels", "indexes": ["parcel_id_1", "..."], "orphan_indexes_dropped": [], "success": true},
+      {"repository": "UsersRepository",   "database": "core",        "collection": "users",   "indexes": ["email_1"], "orphan_indexes_dropped": [], "success": true},
+      {"repository": "TokensRepository",  "database": "core",        "collection": "tokens",  "indexes": [], "orphan_indexes_dropped": [], "success": false, "error": "..."}
+    ]
+  }
 }
 ```
 
@@ -1407,11 +1419,14 @@ This Lambda sets `requires_state = False`: it is not tied to a single state and 
 | `repositories` | `[]` | **Required.** List of `Repository` subclasses (the classes, not instances) to sync. Empty raises a validation error |
 | `states_database` | `"core"` | Database holding the states collection |
 | `states_collection` | `"states"` | Collection listing the states (filtered by `is_active = true`, field `name`) |
+| `max_concurrency` | `10` | Max `(collection, database)` units synced in parallel. `0` (or negative) = unlimited |
 | `requires_state` | `False` | Inherited override — the Lambda runs across all states, no session required |
 
 ### Running it once per deploy (Terraform)
 
-Since deploys are applied manually with Terraform, attach an `aws_lambda_invocation` that runs **on every `apply`**, right after the function code is updated. `timestamp()` changes on every plan, so it always re-runs (creation is idempotent and also picks up any newly-activated state). The `postcondition` fails the `apply` if the sync reports `success = false` (the framework handler returns HTTP 200 with `success = false` on internal errors, so this check is required to surface failures):
+Since deploys are applied manually with Terraform, attach an `aws_lambda_invocation` that runs **on every `apply`**, right after the function code is updated. `timestamp()` changes on every plan, so it always re-runs (creation is idempotent and also picks up any newly-activated state).
+
+> **Detecting failures in the deploy.** The top-level `success` is now **always `true`** — a single failed collection no longer aborts the run, so checking `success` alone won't catch partial failures. If you want the `apply` to fail when any collection failed, point the `postcondition` at `data.summary.failed` instead (shown below). If you'd rather the deploy never fail on index errors and only review them afterward (in the response/logs), simply omit the `lifecycle` block.
 
 ```hcl
 module "lambda" {
@@ -1429,10 +1444,13 @@ resource "aws_lambda_invocation" "sync_on_deploy" {
 
   depends_on = [module.lambda]                                # run after the code is updated
 
+  # Optional: fail the apply if any collection failed to sync.
+  # Omit this whole lifecycle block if you prefer the deploy to never fail on
+  # index errors (review data.results[].success / logs instead).
   lifecycle {
     postcondition {
-      condition     = try(jsondecode(self.result).success, false) == true
-      error_message = "Index sync failed during apply: ${self.result}"
+      condition     = try(jsondecode(self.result).data.summary.failed, 1) == 0
+      error_message = "Index sync had failures during apply: ${self.result}"
     }
   }
 }
