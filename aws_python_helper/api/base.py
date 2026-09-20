@@ -289,6 +289,27 @@ class API(ABC):
         }
     
     @property
+    def public(self) -> bool:
+        """
+        Whether this endpoint answers without a token.
+
+        Declared here, next to the code, so the permission catalog can leave it
+        out: a permission for something nobody needs permission for is noise in
+        every role screen, and an administrator ticking it would be granting
+        nothing.
+
+        This does not make an endpoint public — terraform does, by leaving
+        `authorization` unset on its lambda. This says so, so the rest of the
+        framework can act on it.
+
+            class AuthLoginAPI(API):
+                @property
+                def public(self):
+                    return True
+        """
+        return False
+
+    @property
     def schema(self):
         """
         Optional Pydantic model class for automatic request validation.

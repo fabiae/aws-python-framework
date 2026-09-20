@@ -7,6 +7,34 @@ import importlib.util
 from pathlib import Path
 from typing import List
 
+def load_controller_class(file_path: str):
+    """The API class a controller file defines.
+
+    Shared so the permission catalog asks the class the same questions the
+    dispatcher does — a second way of finding it would answer differently the
+    day one of them changes.
+    """
+    spec = importlib.util.spec_from_file_location("api_module", file_path)
+    if not spec or not spec.loader:
+        raise ImportError(f"Could not load module spec from: {file_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    for item_name in dir(module):
+        item = getattr(module, item_name)
+        if (isinstance(item, type) and
+                hasattr(item, 'process') and
+                item.__name__ not in ['API', 'ABC'] and
+                item.__module__ == module.__name__):
+            return item
+
+    raise ValueError(
+        f"No API class found in {file_path}\n"
+        f"Make sure your file exports a class that inherits from API"
+    )
+
+
 class Fetcher:
     """
     Dynamically load API controllers
@@ -187,30 +215,7 @@ class Fetcher:
                 f"Expected file for endpoint '{self.endpoint}' with method '{self.method}'"
             )
         
-        # Load module dynamically
-        spec = importlib.util.spec_from_file_location("api_module", file_path)
-        if not spec or not spec.loader:
-            raise ImportError(f"Could not load module spec from: {file_path}")
-        
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        
-        # Search for a class that inherits from API
-        controller_class = None
-        for item_name in dir(module):
-            item = getattr(module, item_name)
-            if (isinstance(item, type) and
-                hasattr(item, 'process') and
-                item.__name__ not in ['API', 'ABC'] and
-                item.__module__ == module.__name__):
-                controller_class = item
-                break
-        
-        if not controller_class:
-            raise ValueError(
-                f"No API class found in {file_path}\n"
-                f"Make sure your file exports a class that inherits from API"
-            )
+        controller_class = load_controller_class(file_path)
         
         # Cache the class (not the instance)
         self._cache[file_path] = controller_class

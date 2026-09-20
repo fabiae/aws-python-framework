@@ -12,10 +12,13 @@ otherwise silently stop matching in the other, and an access check that never
 matches fails open or shut without anyone noticing.
 """
 
+import logging
 import os
 from typing import Dict, List
 
-from ..api.fetcher import Fetcher
+from ..api.fetcher import Fetcher, load_controller_class
+
+logger = logging.getLogger(__name__)
 
 # Cómo se llama el archivo según el método. `list` y `get` son ambos GET: uno
 # responde la colección, el otro un elemento.
@@ -46,6 +49,9 @@ def discover(api_root: str, service: str) -> List[Dict[str, str]]:
             if extension != ".py" or stem not in FILE_METHODS:
                 continue
 
+            if _is_public(os.path.join(current, filename)):
+                continue
+
             relative = os.path.relpath(current, api_root)
             parts = [] if relative == "." else relative.split(os.sep)
             path = "/" + "/".join(parts)
@@ -65,6 +71,22 @@ def discover(api_root: str, service: str) -> List[Dict[str, str]]:
             })
 
     return sorted(found, key=lambda item: item["code"])
+
+
+def _is_public(file_path: str) -> bool:
+    """Whether the controller says it answers without a token.
+
+    Errs towards listing it. A permission that appears for a public endpoint is
+    noise; one that disappears for a protected endpoint leaves the check with
+    nothing to match and locks everybody out of it.
+    """
+    try:
+        # A la instancia y no a la clase: `public` es una property, y leerla de
+        # la clase devuelve el objeto property, que siempre es verdadero.
+        return bool(getattr(load_controller_class(file_path)(), "public", False))
+    except Exception as exc:
+        logger.warning("Could not read %s, listing it anyway: %s", file_path, exc)
+        return False
 
 
 def service_wildcard(service: str) -> str:
