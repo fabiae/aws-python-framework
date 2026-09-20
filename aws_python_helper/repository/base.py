@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..database.mongo_manager import MongoManager
 from ..database.external_mongo_manager import ExternalMongoManager
 from ..context.session import get_session
+from .audit import AuditedCollection
 
 
 class Repository(ABC):
@@ -35,6 +36,8 @@ class Repository(ABC):
         is_external (bool): Whether to use an external MongoDB cluster. Default: False.
         cluster_name (str): External cluster name. Required if is_external=True.
         indexes (list): List of index definitions to create automatically.
+        audit (bool): Stamp created_at/created_by/updated_at/updated_by on every
+            write. Default: True — no repository has to remember to do it.
 
     Usage:
         # Core repository — always uses 'core' database
@@ -139,6 +142,24 @@ class Repository(ABC):
         return False
 
     @property
+    def audit(self) -> bool:
+        """
+        Whether writes carry created_at/created_by/updated_at/updated_by.
+
+        On by default, so a record always answers who last touched it and when
+        without any repository having to fill it in. The author is a person when
+        a request carries a token, and the process itself otherwise.
+
+        Turn it off only where the stamp would be noise: collections that already
+        are a log of who did what (sessions, tokens), or raw scraped data written
+        in bulk where the author is always the same process.
+
+            class TokenRepository(Repository):
+                audit = False
+        """
+        return True
+
+    @property
     def cluster_name(self) -> Optional[str]:
         """
         Name of the external cluster to use.
@@ -198,7 +219,11 @@ class Repository(ABC):
             else:
                 db = MongoManager.get_database(self.database_name)
 
-            self._collection_cache[key] = db[self.collection_name]
+            collection = db[self.collection_name]
+            # La envoltura sella las escrituras; todo lo demás pasa de largo.
+            self._collection_cache[key] = (
+                AuditedCollection(collection) if self.audit else collection
+            )
 
         return self._collection_cache[key]
 
