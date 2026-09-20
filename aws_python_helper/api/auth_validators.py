@@ -141,3 +141,112 @@ class TokenValidator(AuthValidator):
             'token_data': token_doc,
             'is_bypass': False
         }
+
+
+class JWTValidator(AuthValidator):
+    """
+    Validates RS256 JWTs issued by constitution-core.
+
+    Stateless: the signature and the claims are enough, so no database is
+    touched. That is what lets any microservice authenticate a request without
+    calling the issuer.
+
+    Environment:
+        JWT_PUBLIC_KEY: RSA public key in PEM, raw or base64-encoded.
+        JWT_ISSUER: expected `iss`. Defaults to 'constitution-core'.
+        JWT_AUDIENCE: expected `aud`. Only verified when set.
+        AUTH_BYPASS_TOKEN: still honoured, same as TokenValidator.
+    """
+
+    _public_key_cache: Optional[str] = None
+
+    @classmethod
+    def _public_key(cls) -> str:
+        """The configured public key, decoded once per container."""
+        if cls._public_key_cache:
+            return cls._public_key_cache
+
+        raw = os.getenv('JWT_PUBLIC_KEY')
+        if not raw:
+            raise ValueError(
+                "JWT_PUBLIC_KEY environment variable not set. "
+                "Required when AUTH_STRATEGY=jwt."
+            )
+
+        key = raw.strip()
+        if not key.startswith('-----BEGIN'):
+            # PEMs are multi-line, so they travel base64-encoded in env vars.
+            import base64
+            key = base64.b64decode(key).decode('utf-8')
+
+        cls._public_key_cache = key
+        return key
+
+    async def validate_token(self, token: str) -> Dict[str, Any]:
+        bypass_token = os.getenv('AUTH_BYPASS_TOKEN')
+        if bypass_token and token == bypass_token:
+            logger.info("Bypass token used - skipping JWT validation")
+            return {
+                'user_id': 'bypass',
+                'user': {
+                    'email': 'bypass@system',
+                    'role': 'admin',
+                    'name': 'Bypass User',
+                    '_id': 'bypass'
+                },
+                'is_bypass': True,
+                'token_data': None
+            }
+
+        try:
+            import jwt
+        except ImportError as exc:
+            raise RuntimeError(
+                "PyJWT is required for AUTH_STRATEGY=jwt. Install aws-python-helper[jwt]."
+            ) from exc
+
+        audience = os.getenv('JWT_AUDIENCE')
+        try:
+            claims = jwt.decode(
+                token,
+                self._public_key(),
+                algorithms=['RS256'],
+                issuer=os.getenv('JWT_ISSUER', 'constitution-core'),
+                audience=audience,
+                options={'verify_aud': bool(audience)},
+            )
+        except jwt.ExpiredSignatureError:
+            logger.warning("JWT expired")
+            raise UnauthorizedError("Token has expired")
+        except jwt.InvalidTokenError as exc:
+            logger.warning("JWT rejected: %s", exc)
+            raise UnauthorizedError("Invalid token")
+
+        if not claims.get('sub'):
+            raise UnauthorizedError("Invalid token")
+
+        # Same shape TokenValidator returns, so nothing downstream changes.
+        return {
+            'user_id': str(claims['sub']),
+            'user': {
+                '_id': claims['sub'],
+                'email': claims.get('email'),
+                'name': claims.get('name', ''),
+                'role': claims.get('role', 'user'),
+                **(claims.get('extra') or {}),
+            },
+            'token_data': claims,
+            'is_bypass': False,
+        }
+
+
+def get_auth_validator() -> AuthValidator:
+    """The validator this service is configured to use.
+
+    AUTH_STRATEGY=jwt switches to stateless validation. Anything else keeps the
+    database lookup, so a service only migrates when its environment says so.
+    """
+    strategy = (os.getenv('AUTH_STRATEGY') or 'db').strip().lower()
+    if strategy == 'jwt':
+        return JWTValidator()
+    return TokenValidator()

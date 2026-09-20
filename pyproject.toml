@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aws-python-helper"
-version = "1.0.3"
+version = "1.1.0"
 description = "AWS Python Helper Framework"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -30,6 +30,10 @@ classifiers = [
 keywords = [
     "aws", "python", "framework", "helper", "mongodb", "sqs", "sns", "fargate", "lambda"
 ]
+
+# Only needed by services running AUTH_STRATEGY=jwt.
+[project.optional-dependencies]
+jwt = ["PyJWT[crypto]>=2.9.0"]
 
 [project.urls]
 "Homepage" = "https://github.com/fabiae/aws-python-framework"

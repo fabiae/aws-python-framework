@@ -11,7 +11,7 @@ from .fetcher import Fetcher
 from .base import API
 from .exceptions import UnauthorizedError, ForbiddenError, AuthenticationError
 from .auth_middleware import AuthMiddleware
-from .auth_validators import TokenValidator
+from .auth_validators import get_auth_validator
 from ..context.session import get_session
 from ..context.state_validator import StateValidator, InvalidStateError
 
@@ -240,8 +240,8 @@ class Dispatcher:
         """
         Execute authentication middleware
         
-        Uses TokenValidator to validate tokens against AUTH_BYPASS_TOKEN
-        or MongoDB database.
+        The validator is chosen by AUTH_STRATEGY: stateless JWT, or the
+        database lookup used so far.
         
         Args:
             api: API instance to inject authentication data into
@@ -249,8 +249,8 @@ class Dispatcher:
         Raises:
             UnauthorizedError: If authentication fails
         """
-        # Use unified token validator
-        validator = TokenValidator()
+        # Strategy comes from configuration, per service
+        validator = get_auth_validator()
         
         # Create middleware and authenticate
         middleware = AuthMiddleware(validator)
