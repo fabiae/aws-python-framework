@@ -79,8 +79,15 @@ class Dispatcher:
             # 2. Authorization based on mode
             authorization = os.getenv('AUTHORIZATION', '').lower()
             requires_user = authorization in ('user', 'full', 'permission')
-            requires_state = authorization in ('state', 'full')
-            requires_permission = authorization == 'permission' 
+            requires_permission = authorization == 'permission'
+
+            # Pedir el state es independiente de pedir un permiso, así que va por
+            # su propia variable. Los valores viejos `state` y `full` la implican,
+            # para que un servicio sin migrar siga comportándose igual.
+            requires_state = (
+                authorization in ('state', 'full')
+                or os.getenv('REQUIRES_STATE', '').lower() in ('1', 'true', 'yes')
+            )
 
             # 2a. Authenticate (if mode requires user)
             if requires_user:
