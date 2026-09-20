@@ -14,6 +14,7 @@ matches fails open or shut without anyone noticing.
 
 import logging
 import os
+import re
 from typing import Dict, List
 
 from ..api.fetcher import Fetcher, load_controller_class
@@ -49,7 +50,8 @@ def discover(api_root: str, service: str) -> List[Dict[str, str]]:
             if extension != ".py" or stem not in FILE_METHODS:
                 continue
 
-            if _is_public(os.path.join(current, filename)):
+            controller = _controller(os.path.join(current, filename))
+            if controller and getattr(controller(), "public", False):
                 continue
 
             relative = os.path.relpath(current, api_root)
@@ -68,25 +70,38 @@ def discover(api_root: str, service: str) -> List[Dict[str, str]]:
                 "method": method,
                 "path": path,
                 "scope": "item" if stem == "get" else "collection",
+                "name": _readable(controller),
             })
 
     return sorted(found, key=lambda item: item["code"])
 
 
-def _is_public(file_path: str) -> bool:
-    """Whether the controller says it answers without a token.
+def _controller(file_path: str):
+    """The controller class, or None if it cannot be read.
 
-    Errs towards listing it. A permission that appears for a public endpoint is
-    noise; one that disappears for a protected endpoint leaves the check with
-    nothing to match and locks everybody out of it.
+    None errs towards listing the endpoint. A permission that appears for a
+    public endpoint is noise; one that disappears for a protected endpoint
+    leaves the check with nothing to match and locks everybody out of it.
     """
     try:
-        # A la instancia y no a la clase: `public` es una property, y leerla de
-        # la clase devuelve el objeto property, que siempre es verdadero.
-        return bool(getattr(load_controller_class(file_path)(), "public", False))
+        return load_controller_class(file_path)
     except Exception as exc:
         logger.warning("Could not read %s, listing it anyway: %s", file_path, exc)
-        return False
+        return None
+
+
+def _readable(controller) -> str:
+    """The class name as words: `UsersInviteAPI` -> `Users Invite`.
+
+    A panel showing raw paths makes people read routing to answer "what does
+    this let someone do". The class already names the thing; this only spaces it
+    out. Empty when the class could not be read, so the panel falls back to the
+    path rather than inventing a name.
+    """
+    if controller is None:
+        return ""
+    name = re.sub(r"(API|Api)$", "", controller.__name__)
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", name).strip()
 
 
 def service_wildcard(service: str) -> str:
