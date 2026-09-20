@@ -40,7 +40,7 @@ Response (via Lambda base run()):
     {"success": True, "data": [...]}
 """
 
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from bson import ObjectId
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -111,6 +111,36 @@ class _ModelQuerySchema(BaseModel):
         return self
 
 
+def _enforce_exclusions(
+    fields: Optional[dict], excluded: List[str]
+) -> dict:
+    """The projection the owner allows, whatever the caller asked for.
+
+    Mongo reads a projection as inclusive or exclusive, never both, so the
+    forbidden fields are dropped from an inclusive one and added to an exclusive
+    one. `_id` is ignored when deciding which it is: it may appear in either.
+    """
+    projection = dict(fields or {})
+    if not excluded:
+        return projection
+
+    inclusive = any(value for key, value in projection.items() if key != "_id")
+    if not inclusive:
+        for name in excluded:
+            projection[name] = 0
+        return projection
+
+    for name in excluded:
+        projection.pop(name, None)
+
+    # Pedir sólo el campo prohibido dejaría la proyección vacía, y una
+    # proyección vacía en Mongo devuelve el documento entero: exactamente lo
+    # contrario de lo buscado. Sin nada legítimo que pedir, sólo el id.
+    if not any(value for key, value in projection.items() if key != "_id"):
+        return {"_id": 1}
+    return projection
+
+
 class ModelQueryLambda(Lambda):
     """
     Base class for cross-service MongoDB query Lambdas.
@@ -120,18 +150,34 @@ class ModelQueryLambda(Lambda):
     """
 
     @property
-    def allowed_collections(self) -> List[str]:
+    def allowed_collections(self) -> Union[List[str], Dict[str, dict]]:
         """
         Whitelist of collection names this Lambda is allowed to query.
 
         Must be overridden — an empty list rejects all requests.
 
-        Example:
+        A list exposes each collection whole:
+
             @property
             def allowed_collections(self):
                 return ["dockets", "tax_sales"]
+
+        A dict lets the owner keep fields in, whatever the caller projects. This
+        is not `fields`: that one is the caller saying what it wants, this one is
+        the owner saying what never leaves.
+
+            @property
+            def allowed_collections(self):
+                return {"dockets": {}, "users": {"exclude": ["password"]}}
         """
         return []
+
+    def excluded_fields(self, collection: str) -> List[str]:
+        """Fields this collection never returns. Empty for list-style whitelists."""
+        allowed = self.allowed_collections
+        if not isinstance(allowed, dict):
+            return []
+        return list((allowed.get(collection) or {}).get("exclude") or [])
 
     @property
     def schema(self):
@@ -151,6 +197,16 @@ class ModelQueryLambda(Lambda):
                 f"Collection '{collection}' is not allowed. Allowed: {allowed}"
             )
 
+        # Una pipeline puede renombrar un campo antes de que lo quitemos
+        # ($addFields, $replaceRoot, $lookup), así que no hay forma honesta de
+        # garantizar la exclusión sobre ella. Un $unset final daría una falsa
+        # sensación de seguridad, que es peor que no tener la función.
+        if self.excluded_fields(collection) and self.data.get("pipeline") is not None:
+            raise ValueError(
+                f"Collection '{collection}' hides fields, so it cannot be queried "
+                f"with a pipeline. Use 'filter' instead."
+            )
+
     async def process(self) -> Any:
         collection_name: str = self.data["collection"]
         database: str = self.data.get("database") or self.session.state
@@ -167,7 +223,10 @@ class ModelQueryLambda(Lambda):
             limit: int = self.data.get("limit") or 0
             skip: int = self.data.get("skip") or 0
 
-            cursor = collection.find(mongo_filter, fields or {})
+            projection = _enforce_exclusions(
+                fields, self.excluded_fields(collection_name)
+            )
+            cursor = collection.find(mongo_filter, projection)
 
             if skip:
                 cursor = cursor.skip(skip)
