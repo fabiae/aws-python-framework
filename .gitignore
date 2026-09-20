@@ -1,6 +1,7 @@
 venv/
 dist/
 CLAUDE.md
-aws_python_helper.egg-info__pycache__/
+aws_python_helper.egg-info/
+__pycache__/
 *.pyc
 *.pyo
