@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..database.mongo_manager import MongoManager
 from ..database.external_mongo_manager import ExternalMongoManager
 from ..context.session import get_session
-from .audit import AuditedCollection
+from .audit import DEFAULT_STATUSES, AuditedCollection
 
 
 class Repository(ABC):
@@ -38,6 +38,11 @@ class Repository(ABC):
         indexes (list): List of index definitions to create automatically.
         audit (bool): Stamp created_at/created_by/updated_at/updated_by on every
             write. Default: True — no repository has to remember to do it.
+        statuses (list[str] | None): Allowed values of the record's `status`.
+            Default: ['active', 'inactive']. None means this collection has no
+            status at all.
+        default_status (str): What a new record gets. Default: the first of
+            `statuses`.
 
     Usage:
         # Core repository — always uses 'core' database
@@ -142,6 +147,35 @@ class Repository(ABC):
         return False
 
     @property
+    def statuses(self) -> Optional[List[str]]:
+        """
+        The values this record's `status` can take.
+
+        Every entity carries one, and the same two by default, so a listing can
+        show the state of anything without knowing what it is looking at. A
+        repository with its own lifecycle declares it:
+
+            class UserRepository(Repository):
+                @property
+                def statuses(self):
+                    return ["active", "pending", "inactive"]
+
+        A write with a value outside this set is refused, not stored: an
+        unexpected status reaches a panel as an unknown label and a query as a
+        silent mismatch.
+
+        None for collections where a lifecycle makes no sense — sessions, tokens,
+        counters.
+        """
+        return list(DEFAULT_STATUSES)
+
+    @property
+    def default_status(self) -> Optional[str]:
+        """What a record gets when nobody says otherwise. First of `statuses`."""
+        declared = self.statuses
+        return declared[0] if declared else None
+
+    @property
     def audit(self) -> bool:
         """
         Whether writes carry created_at/created_by/updated_at/updated_by.
@@ -220,9 +254,11 @@ class Repository(ABC):
                 db = MongoManager.get_database(self.database_name)
 
             collection = db[self.collection_name]
-            # La envoltura sella las escrituras; todo lo demás pasa de largo.
+            # La envoltura completa las escrituras; todo lo demás pasa de largo.
             self._collection_cache[key] = (
-                AuditedCollection(collection) if self.audit else collection
+                AuditedCollection(collection, self.statuses, self.default_status)
+                if self.audit
+                else collection
             )
 
         return self._collection_cache[key]

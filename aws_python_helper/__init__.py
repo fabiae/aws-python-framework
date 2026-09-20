@@ -26,7 +26,14 @@ from .utils.serializer import serialize_mongo_types
 
 # Repository
 from .repository.base import Repository
-from .repository.audit import current_actor, public_audit
+from .repository.audit import (
+    ACTIVE,
+    DEFAULT_STATUSES,
+    INACTIVE,
+    InvalidStatusError,
+    current_actor,
+    public_audit,
+)
 
 # Context
 from .context.session import Session, get_session, set_session
@@ -62,6 +69,10 @@ __all__ = [
     'Repository',
     'current_actor',
     'public_audit',
+    'ACTIVE',
+    'INACTIVE',
+    'DEFAULT_STATUSES',
+    'InvalidStatusError',
     'fargate_handler',
     'api_handler',
     'sqs_handler',

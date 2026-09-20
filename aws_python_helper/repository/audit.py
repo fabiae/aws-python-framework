@@ -1,10 +1,17 @@
 """
-Automatic audit stamping for every write.
+Framework-managed fields on every write: who, when, and what state.
 
 Records answer "who last touched this, and when" without any repository having to
-remember to fill it in. The four fields —created_at, created_by, updated_at,
-updated_by— are injected by wrapping the Motor collection, so call sites keep
-using `self.collection.insert_one(...)` exactly as before.
+remember to fill it in. The four audit fields —created_at, created_by,
+updated_at, updated_by— plus `status` are injected by wrapping the Motor
+collection, so call sites keep using `self.collection.insert_one(...)` exactly as
+before.
+
+`status` is the lifecycle of a record, uniform across every entity so a listing
+can show it without knowing what it is looking at. Two values by default, active
+and inactive; a repository declaring `statuses` gets its own set. A value outside
+that set is refused rather than stored: a status nobody expected reaches a panel
+as an unknown label and a query as a silent mismatch.
 
 Not every write comes from a person. A scraper, a queue consumer or a scheduled
 task writes too, and the stamp says so: "nobody knows" and "the system did it"
@@ -28,6 +35,11 @@ CREATED_AT = 'created_at'
 CREATED_BY = 'created_by'
 UPDATED_AT = 'updated_at'
 UPDATED_BY = 'updated_by'
+STATUS = 'status'
+
+ACTIVE = 'active'
+INACTIVE = 'inactive'
+DEFAULT_STATUSES = [ACTIVE, INACTIVE]
 
 
 def _system_actor() -> Dict[str, str]:
@@ -66,11 +78,27 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def stamp_new(document: Dict[str, Any]) -> Dict[str, Any]:
-    """The four fields on a document being created.
+class InvalidStatusError(ValueError):
+    """A status the repository does not declare."""
+
+
+def _check_status(value: Any, statuses: Optional[List[str]]) -> None:
+    if statuses and value is not None and value not in statuses:
+        raise InvalidStatusError(
+            f"'{value}' is not a valid status. Declared: {', '.join(statuses)}"
+        )
+
+
+def stamp_new(
+    document: Dict[str, Any],
+    statuses: Optional[List[str]] = None,
+    default_status: Optional[str] = None,
+) -> Dict[str, Any]:
+    """The framework fields on a document being created.
 
     Whatever the caller set explicitly wins: this fills gaps, it does not
-    overrule a repository that knows better.
+    overrule a repository that knows better. What it does not let pass is a
+    status outside the declared set.
     """
     if not isinstance(document, dict):
         return document
@@ -80,6 +108,10 @@ def stamp_new(document: Dict[str, Any]) -> Dict[str, Any]:
     document.setdefault(UPDATED_AT, now)
     document.setdefault(CREATED_BY, who)
     document.setdefault(UPDATED_BY, who)
+
+    if statuses:
+        document.setdefault(STATUS, default_status or statuses[0])
+        _check_status(document.get(STATUS), statuses)
     return document
 
 
@@ -95,6 +127,8 @@ def _merge_into_set(update: Dict[str, Any], values: Dict[str, Any], operator: st
 def stamp_update(
     update: Union[Dict[str, Any], List[Dict[str, Any]]],
     upsert: bool = False,
+    statuses: Optional[List[str]] = None,
+    default_status: Optional[str] = None,
 ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
     """The two 'updated' fields on a modification, and the 'created' ones on an upsert.
 
@@ -114,18 +148,28 @@ def stamp_update(
 
     # Un reemplazo entero —sin operadores— es un documento, no una modificación.
     if update and not any(key.startswith('$') for key in update):
-        return stamp_new(dict(update))
+        return stamp_new(dict(update), statuses, default_status)
 
     update = dict(update)
+    if statuses:
+        for operator in ('$set', '$setOnInsert'):
+            section = update.get(operator)
+            if isinstance(section, dict) and STATUS in section:
+                _check_status(section[STATUS], statuses)
+
     _merge_into_set(update, touched, '$set')
     if upsert:
-        # Si termina insertando, el registro nace ahora: created_* sólo en ese caso.
-        _merge_into_set(update, {CREATED_AT: now, CREATED_BY: who}, '$setOnInsert')
+        # Si termina insertando, el registro nace ahora: created_* y el estado
+        # inicial sólo en ese caso.
+        born = {CREATED_AT: now, CREATED_BY: who}
+        if statuses:
+            born[STATUS] = default_status or statuses[0]
+        _merge_into_set(update, born, '$setOnInsert')
     return update
 
 
 class AuditedCollection:
-    """A Motor collection that stamps who wrote and when.
+    """A Motor collection that fills in who wrote, when, and the record's status.
 
     Only the write methods are intercepted; everything else —find, aggregate,
     count_documents, create_index— passes straight through untouched.
@@ -135,10 +179,23 @@ class AuditedCollection:
     than asking for the stamp explicitly.
     """
 
-    __slots__ = ('_collection',)
+    __slots__ = ('_collection', '_statuses', '_default_status')
 
-    def __init__(self, collection: Any):
+    def __init__(
+        self,
+        collection: Any,
+        statuses: Optional[List[str]] = None,
+        default_status: Optional[str] = None,
+    ):
         object.__setattr__(self, '_collection', collection)
+        object.__setattr__(self, '_statuses', statuses)
+        object.__setattr__(self, '_default_status', default_status)
+
+    def _new(self, document: Dict[str, Any]) -> Dict[str, Any]:
+        return stamp_new(document, self._statuses, self._default_status)
+
+    def _update(self, update: Any, upsert: bool) -> Any:
+        return stamp_update(update, upsert, self._statuses, self._default_status)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._collection, name)
@@ -147,36 +204,36 @@ class AuditedCollection:
         return f'AuditedCollection({self._collection!r})'
 
     async def insert_one(self, document: Dict[str, Any], *args: Any, **kwargs: Any):
-        return await self._collection.insert_one(stamp_new(document), *args, **kwargs)
+        return await self._collection.insert_one(self._new(document), *args, **kwargs)
 
     async def insert_many(self, documents: Any, *args: Any, **kwargs: Any):
         return await self._collection.insert_many(
-            [stamp_new(document) for document in documents], *args, **kwargs
+            [self._new(document) for document in documents], *args, **kwargs
         )
 
     async def update_one(self, filter: Any, update: Any, *args: Any, **kwargs: Any):
         return await self._collection.update_one(
-            filter, stamp_update(update, kwargs.get('upsert', False)), *args, **kwargs
+            filter, self._update(update, kwargs.get('upsert', False)), *args, **kwargs
         )
 
     async def update_many(self, filter: Any, update: Any, *args: Any, **kwargs: Any):
         return await self._collection.update_many(
-            filter, stamp_update(update, kwargs.get('upsert', False)), *args, **kwargs
+            filter, self._update(update, kwargs.get('upsert', False)), *args, **kwargs
         )
 
     async def find_one_and_update(self, filter: Any, update: Any, *args: Any, **kwargs: Any):
         return await self._collection.find_one_and_update(
-            filter, stamp_update(update, kwargs.get('upsert', False)), *args, **kwargs
+            filter, self._update(update, kwargs.get('upsert', False)), *args, **kwargs
         )
 
     async def replace_one(self, filter: Any, replacement: Any, *args: Any, **kwargs: Any):
         return await self._collection.replace_one(
-            filter, stamp_new(dict(replacement)), *args, **kwargs
+            filter, self._new(dict(replacement)), *args, **kwargs
         )
 
     async def find_one_and_replace(self, filter: Any, replacement: Any, *args: Any, **kwargs: Any):
         return await self._collection.find_one_and_replace(
-            filter, stamp_new(dict(replacement)), *args, **kwargs
+            filter, self._new(dict(replacement)), *args, **kwargs
         )
 
 
