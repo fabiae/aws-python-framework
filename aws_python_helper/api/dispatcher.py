@@ -78,12 +78,19 @@ class Dispatcher:
             
             # 2. Authorization based on mode
             authorization = os.getenv('AUTHORIZATION', '').lower()
-            requires_user = authorization in ('user', 'full')
+            requires_user = authorization in ('user', 'full', 'permission')
             requires_state = authorization in ('state', 'full')
+            requires_permission = authorization == 'permission' 
 
             # 2a. Authenticate (if mode requires user)
             if requires_user:
                 await self._authenticate(api)
+
+            # 2a-bis. Check what the caller is allowed to do
+            if requires_permission:
+                denial = await self._authorize(api)
+                if denial:
+                    return denial
 
             # 2b. Validate state header (if mode requires state)
             if requires_state:
@@ -236,6 +243,43 @@ class Dispatcher:
         
         return api
     
+    async def _authorize(self, api: API):
+        """Refuse the request when the caller lacks the permission it needs.
+
+        Returns the response to send back, or None to carry on.
+        """
+        from ..permissions import allows, required_for
+
+        granted = await api.granted_permissions()
+        if granted is None:
+            logger.error(
+                "AUTHORIZATION=permission but %s does not implement "
+                "granted_permissions(); refusing the request",
+                type(api).__name__,
+            )
+            return {
+                'code': 403,
+                'body': {
+                    'error': 'Forbidden',
+                    'message': 'Permission checking is not configured for this endpoint',
+                },
+                'headers': {},
+            }
+
+        required = required_for(api.service_code, self.method, self.endpoint)
+        if allows(granted, required):
+            return None
+
+        logger.warning("Denied: %s lacks %r", self.headers.get('x-caller', 'caller'), required)
+        return {
+            'code': 403,
+            'body': {
+                'error': 'Forbidden',
+                'message': f"Te falta el permiso '{required}'",
+            },
+            'headers': {},
+        }
+
     async def _authenticate(self, api: API):
         """
         Execute authentication middleware

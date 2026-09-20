@@ -186,6 +186,28 @@ class API(ABC):
         """
         return self._is_authenticated
     
+    async def granted_permissions(self):
+        """Which permissions the caller holds, or None when this API does not know.
+
+        Override it to turn on permission checking for a service. Where the list
+        comes from is the service's business: its own database, a map cached from
+        core, whatever fits.
+
+        Returning None with AUTHORIZATION=permission is refused, not waved
+        through. An endpoint that cannot say what its caller may do has to be a
+        closed door: the alternative is that forgetting to wire this up leaves it
+        open to anyone holding a token, which is the failure this whole mechanism
+        exists to prevent.
+        """
+        return None
+
+    @property
+    def service_code(self) -> str:
+        """Names this service inside a permission, as in `core:GET /users`."""
+        import os
+
+        return os.getenv('SERVICE_CODE', os.getenv('NAMESPACE', 'service'))
+
     @property
     def auth_data(self) -> Optional[Dict[str, Any]]:
         """
