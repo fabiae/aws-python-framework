@@ -91,7 +91,7 @@ class Fetcher:
     
     def _looks_like_id(self, part: str) -> bool:
         """
-        Check if a URL part looks like an ID (numeric or UUID format)
+        Check if a URL part looks like an ID (numeric, ObjectId or UUID format)
         
         Args:
             part: URL part to check
@@ -105,6 +105,15 @@ class Fetcher:
         # Check if it's numeric
         if part.isdigit():
             return True
+
+        # ObjectId de MongoDB: 24 caracteres hexadecimales. Sin esto, un
+        # PATCH /users/<oid> busca un directorio con el id como nombre.
+        if len(part) == 24:
+            try:
+                int(part, 16)
+                return True
+            except ValueError:
+                pass
         
         # Check if it's a UUID format (8-4-4-4-12 hex digits)
         if len(part) == 36 and part.count('-') == 4:
