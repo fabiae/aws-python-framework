@@ -57,8 +57,13 @@ from .invoker import (
 )
 
 
+from .monitoring import process_run, RunReporter, ProcessRunPublisher
+
 __all__ = [
     'API',
+    'process_run',
+    'RunReporter',
+    'ProcessRunPublisher',
     'SQSConsumer',
     'MongoManager',
     'DatabaseProxy',
