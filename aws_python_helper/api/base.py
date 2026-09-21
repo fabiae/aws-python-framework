@@ -203,10 +203,14 @@ class API(ABC):
 
     @property
     def service_code(self) -> str:
-        """Names this service inside a permission, as in `core:GET /users`."""
-        import os
+        """Names this service inside a permission, as in `core:GET /users`.
 
-        return os.getenv('SERVICE_CODE', os.getenv('NAMESPACE', 'service'))
+        Resolved by the same function the catalog uses, so the name a permission
+        is stored under and the name it is demanded by cannot drift.
+        """
+        from ..permissions import service_code
+
+        return service_code()
 
     @property
     def auth_data(self) -> Optional[Dict[str, Any]]:

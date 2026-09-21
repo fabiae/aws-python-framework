@@ -35,6 +35,19 @@ FILE_METHODS = {
 ALL = "*"
 
 
+def service_code() -> str:
+    """The name this service takes inside a permission code, as in `core:GET /users`.
+
+    One function on purpose. Publishing the catalog and checking a permission are
+    two different places, and if each resolves the name its own way one stores
+    `core:GET /users` while the other demands `constitution-core:GET /users`.
+    Nothing reports that: every role with explicit permissions just gets 403 on
+    everything, and a role holding `*` keeps working, so it looks like a problem
+    with the role.
+    """
+    return os.getenv("SERVICE_CODE") or os.getenv("NAMESPACE") or "service"
+
+
 def discover(api_root: str, service: str) -> List[Dict[str, str]]:
     """Every endpoint this service answers, as permission records.
 
