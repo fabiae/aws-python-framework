@@ -88,6 +88,10 @@ class _ModelQuerySchema(BaseModel):
     model_config = ConfigDict(extra="ignore", arbitrary_types_allowed=True)
 
     collection: str
+    # La base donde buscar. Estaba documentada como parámetro pero no declarada,
+    # y `extra="ignore"` la descartaba en silencio: la consulta terminaba en la
+    # base del estado de la sesión y devolvía vacío sin error.
+    database: Optional[str] = None
     filter: Optional[dict] = None
     pipeline: Optional[list] = None
     fields: Optional[dict] = None
