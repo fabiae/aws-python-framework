@@ -57,11 +57,12 @@ from .invoker import (
 )
 
 
-from .monitoring import process_run, RunReporter, ProcessRunPublisher
+from .monitoring import process_run, resolve_code, RunReporter, ProcessRunPublisher
 
 __all__ = [
     'API',
     'process_run',
+    'resolve_code',
     'RunReporter',
     'ProcessRunPublisher',
     'SQSConsumer',

@@ -15,6 +15,11 @@ from abc import ABC
 from ..context.session import get_session
 
 
+# Lo que SNS acepta en una sola llamada a PublishBatch. No es configurable: es
+# un límite del servicio, y pasarse falla el lote entero sin publicar nada.
+MAX_BATCH_ENTRIES = 10
+
+
 class SNSPublisher(ABC):
     """
     Base class to publish messages to SNS
@@ -172,35 +177,52 @@ class SNSPublisher(ABC):
         message_ids_success = []
         message_ids_failed = []
 
-        params = {
-            'TopicArn': self.topic_arn
-        }
-        
         for i, message in enumerate(messages):
             try:
                 message_to_publish.append(self._format_message(message, i))
             except Exception as e:
                 self.logger.error(f"Error publishing message {i} in batch: {e}")
+                message_ids_failed.append(None)
                 # Continue with the other messages
                 continue
 
-        params['PublishBatchRequestEntries'] = message_to_publish
+        # De a diez, que es lo que SNS acepta por llamada. Mandar más falla el
+        # lote entero sin publicar nada, así que una lista larga no se pierde a
+        # medias: se pierde completa.
+        for start in range(0, len(message_to_publish), MAX_BATCH_ENTRIES):
+            chunk = message_to_publish[start:start + MAX_BATCH_ENTRIES]
 
-        try:
-            result = self.sns_client.publish_batch(**params)
-        except Exception as e:
-            self.logger.error(f"Error calling publish_batch to {self.topic_arn}: {e}")
-            raise
+            # El Id sólo tiene que ser único dentro de su propia llamada.
+            entries = [
+                {**entry, 'Id': str(position)}
+                for position, entry in enumerate(chunk)
+            ]
 
-        for message in result.get('Successful', []):
-            message_ids_success.append(message['MessageId'])
+            try:
+                result = self.sns_client.publish_batch(
+                    TopicArn=self.topic_arn,
+                    PublishBatchRequestEntries=entries,
+                )
+            except Exception as e:
+                # Se sigue con los demás lotes: cortar acá dejaría sin publicar
+                # todo lo que venía detrás por un problema que puede ser de este
+                # lote solo.
+                self.logger.error(
+                    f"Error calling publish_batch to {self.topic_arn} "
+                    f"({start}-{start + len(chunk) - 1} of {len(message_to_publish)}): {e}"
+                )
+                message_ids_failed.extend([None] * len(chunk))
+                continue
 
-        for message in result.get('Failed', []):
-            self.logger.error(
-                f"Failed to publish message {message.get('Id')} to {self.topic_arn}: "
-                f"Code={message.get('Code')}, Message={message.get('Message')}"
-            )
-            message_ids_failed.append(None)
+            for message in result.get('Successful', []):
+                message_ids_success.append(message['MessageId'])
+
+            for message in result.get('Failed', []):
+                self.logger.error(
+                    f"Failed to publish message {message.get('Id')} to {self.topic_arn}: "
+                    f"Code={message.get('Code')}, Message={message.get('Message')}"
+                )
+                message_ids_failed.append(None)
 
         self.logger.info(
             f"Batch publish to {self.topic_arn}: "

@@ -4,10 +4,21 @@ Two hand-written publishes would work, and the second one would get forgotten on
 the path that matters: the failure. So the boundary is a context manager — enter
 and it says it started, leave and it says how it went, exception included.
 
-Nothing here can raise into the caller. Monitoring must never be able to break
-the thing it monitors: a topic that does not exist, credentials that are wrong,
-SNS being slow are all reasons to lose a record, never reasons to fail a run that
-otherwise worked.
+The process code is the name of the AWS resource doing the work, taken from the
+environment. Nobody types it twice: a code invented here and typed again in the
+panel is a code that will not match one day, and a mismatch is silent — the runs
+arrive, core finds no process, and nothing is recorded. Taking it from the
+environment means the panel can offer the real resource list and the two sides
+cannot drift.
+
+Nothing here decides whether a run is kept. It publishes; core has the database
+and filters. Wrapping something in `process_run` is not turning monitoring on —
+registering the process in the panel is.
+
+Nothing here can raise into the caller either. Monitoring must never be able to
+break the thing it monitors: a topic that does not exist, credentials that are
+wrong, SNS being slow are all reasons to lose a record, never reasons to fail a
+run that otherwise worked.
 """
 
 import logging
@@ -17,6 +28,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from ..context.session import get_session
 from ..sns.publisher import SNSPublisher
 
 logger = logging.getLogger(__name__)
@@ -27,6 +39,11 @@ SUCCESS = "success"
 FAILED = "failed"
 
 TOPIC_ENV = "PROCESS_RUNS_TOPIC_ARN"
+
+# De dónde sale el código del proceso, en orden. `PROCESS_CODE` es para lo que no
+# es una lambda —una tarea de Fargate lo recibe en su definición— y el nombre de
+# la función es lo que AWS deja puesto solo.
+CODE_ENVS = ("PROCESS_CODE", "AWS_LAMBDA_FUNCTION_NAME")
 
 
 class ProcessRunPublisher(SNSPublisher):
@@ -81,12 +98,25 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def resolve_code(explicit: Optional[str] = None) -> Optional[str]:
+    """El código del proceso: el nombre del recurso que está corriendo."""
+    if explicit:
+        return explicit
+    for name in CODE_ENVS:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value
+    return None
+
+
 @asynccontextmanager
 async def process_run(
-    process_code: str,
+    process_code: Optional[str] = None,
     *,
     run_id: Optional[str] = None,
+    parent_run_id: Optional[str] = None,
     scope: Optional[str] = None,
+    state: Optional[str] = None,
     resource_arn: Optional[str] = None,
     request_id: Optional[str] = None,
 ):
@@ -101,47 +131,65 @@ async def process_run(
     se está vigilando, y registrarlo solo llenaría la pantalla de ejecuciones que
     nadie puede configurar.
     """
-    reporter = RunReporter(run_id or str(uuid.uuid4()), process_code)
+    code = resolve_code(process_code)
+    if not code:
+        # Sin código no hay a qué proceso pertenecer. Se sigue adelante sin
+        # reportar: el trabajo importa más que su registro.
+        logger.warning(
+            "No process code: pass one, or set %s. The run was not reported",
+            " or ".join(CODE_ENVS),
+        )
+        yield RunReporter("", "")
+        return
+
+    # El estado sale de la sesión: core identifica un proceso por código *y*
+    # estado, porque una misma lambda corre para varios con frecuencias
+    # distintas.
+    if state is None:
+        session = get_session()
+        state = session.state if session else None
+
+    reporter = RunReporter(run_id or str(uuid.uuid4()), code)
     started_at = _now()
+    common = {
+        "run_id": reporter.run_id,
+        "process_code": code,
+        "state": state,
+        "parent_run_id": parent_run_id,
+        "request_id": request_id,
+    }
 
     await _publish({
-        "run_id": reporter.run_id,
-        "process_code": process_code,
+        **common,
         "status": LAUNCHED,
         "started_at": started_at,
         "scope": scope,
-        # Lo único que AWS deja en el ambiente. El ARN completo y el id de la
-        # invocación viven en el `context` del handler, que acá no se tiene: quien
-        # lo tenga los pasa por `resource_arn` y `request_id`.
-        "resource_arn": resource_arn or os.getenv("AWS_LAMBDA_FUNCTION_NAME") or None,
-        "request_id": request_id,
+        # El ARN completo y el id de la invocación viven en el `context` del
+        # handler, que acá no se tiene: quien lo tenga los pasa por parámetro.
+        "resource_arn": resource_arn,
     })
 
     try:
         yield reporter
     except Exception as error:
         await _publish({
-            "run_id": reporter.run_id,
-            "process_code": process_code,
+            **common,
             "status": FAILED,
             "started_at": started_at,
             "finished_at": _now(),
             "error": f"{type(error).__name__}: {error}"[:2000],
             "counters": reporter.counters,
             "scope": reporter.scope or scope,
-            "request_id": request_id,
         })
         # La excepción sigue su camino: el monitoreo anota lo que pasó, no lo
         # decide. Tragarla acá convertiría una falla en un éxito silencioso.
         raise
     else:
         await _publish({
-            "run_id": reporter.run_id,
-            "process_code": process_code,
+            **common,
             "status": SUCCESS,
             "started_at": started_at,
             "finished_at": _now(),
             "counters": reporter.counters,
             "scope": reporter.scope or scope,
-            "request_id": request_id,
         })
