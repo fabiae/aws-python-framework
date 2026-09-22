@@ -124,6 +124,23 @@ def _merge_into_set(update: Dict[str, Any], values: Dict[str, Any], operator: st
         section.setdefault(key, value)
 
 
+def _written_elsewhere(update: Dict[str, Any], key: str, operator: str) -> bool:
+    """Si otro operador de esta misma actualización ya escribe ese campo.
+
+    Mongo rechaza el update entero si dos operadores tocan la misma ruta —
+    `$set: {status}` junto a `$setOnInsert: {status}` da "would create a
+    conflict at 'status'" — y el sello no tiene por qué ser el que lo provoque.
+    Si el llamador ya escribe el campo, el insert va a quedar con su valor, así
+    que el sello ahí sobra.
+    """
+    for other, section in update.items():
+        if other == operator or not other.startswith('$') or not isinstance(section, dict):
+            continue
+        if key in section:
+            return True
+    return False
+
+
 def stamp_update(
     update: Union[Dict[str, Any], List[Dict[str, Any]]],
     upsert: bool = False,
@@ -164,6 +181,11 @@ def stamp_update(
         born = {CREATED_AT: now, CREATED_BY: who}
         if statuses:
             born[STATUS] = default_status or statuses[0]
+        born = {
+            key: value
+            for key, value in born.items()
+            if not _written_elsewhere(update, key, '$setOnInsert')
+        }
         _merge_into_set(update, born, '$setOnInsert')
     return update
 
