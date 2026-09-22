@@ -276,13 +276,18 @@ class SNSPublisher(ABC):
         
         return formatted
     
-    def _format_message(self, message: Dict[str, Any], index: int) -> Dict[str, Any]:
+    def _format_message(
+        self, message: Dict[str, Any], index: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
         Formats the message for SNS
-        
+
         Args:
             message: Message to format
-        
+            index: Position inside a batch. `publish_batch` needs an `Id` per
+                entry; plain `publish` does not take one at all, so a single
+                message leaves it out.
+
         Returns:
             Formatted message
         """
@@ -305,10 +310,9 @@ class SNSPublisher(ABC):
                 session_json = self._serialize_message(session_dict)
                 attributes['session'] = base64.b64encode(session_json.encode('utf-8')).decode('utf-8')
 
-        params = {
-            'Id': str(index),
-            'Message': content
-        }
+        params: Dict[str, Any] = {'Message': content}
+        if index is not None:
+            params['Id'] = str(index)
         
         # Add subject if exists
         if subject:
