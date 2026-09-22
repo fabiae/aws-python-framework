@@ -11,6 +11,11 @@ class StateValidator:
     """
     Validates that a state exists and is active in the core.states collection.
 
+    A state counts as active with either `status: "active"` or `is_active: True`.
+    The boolean is what every service has written until now; the status is what
+    the region catalog replicates. Accepting both means the boolean can be
+    dropped once no service reads it, without a flag day.
+
     Uses an in-memory cache with a 5-minute TTL to avoid querying the database
     on every request. Only valid (active) states are cached — invalid states
     always hit the database so that recently activated states are picked up
@@ -23,7 +28,7 @@ class StateValidator:
     @classmethod
     async def validate(cls, state: str):
         """
-        Validate that state exists in core.states with is_active=True.
+        Validate that state exists in core.states and is active.
 
         Args:
             state: The state name to validate
@@ -40,7 +45,10 @@ class StateValidator:
 
         from ..database.mongo_manager import MongoManager
         db = MongoManager.get_database('core')
-        doc = await db.states.find_one({"name": state, "is_active": True})
+        doc = await db.states.find_one({
+            "name": state,
+            "$or": [{"status": "active"}, {"is_active": True}],
+        })
 
         if doc:
             cls._cache[state] = now
