@@ -189,17 +189,38 @@ class API(ABC):
     async def granted_permissions(self):
         """Which permissions the caller holds, or None when this API does not know.
 
-        Override it to turn on permission checking for a service. Where the list
-        comes from is the service's business: its own database, a map cached from
-        core, whatever fits.
+        By default they come from the token: core signs them in, so a service
+        authorizes on its own without asking anybody. That is the whole point —
+        a service that had to call core on every request would put core back in
+        the read path of the entire platform.
+
+        Override it where the list comes from somewhere else. Core does: it holds
+        the roles, so it reads them rather than trusting a claim it just signed.
 
         Returning None with AUTHORIZATION=permission is refused, not waved
         through. An endpoint that cannot say what its caller may do has to be a
         closed door: the alternative is that forgetting to wire this up leaves it
         open to anyone holding a token, which is the failure this whole mechanism
         exists to prevent.
+
+        A token with no `permissions` claim yields an empty list, not None: it is
+        a caller who may do nothing, which is different from an endpoint that
+        cannot tell.
         """
-        return None
+        auth = self.auth_data or {}
+
+        # La marca de dev y el token maestro responden por todo: son la forma de
+        # entrar cuando una configuración de permisos quedó mal.
+        if auth.get('is_bypass') or (auth.get('user') or {}).get('is_dev') is True:
+            from ..permissions import ALL
+            return [ALL]
+
+        claims = auth.get('token_data')
+        if not isinstance(claims, dict):
+            return None
+
+        granted = claims.get('permissions')
+        return list(granted) if isinstance(granted, list) else []
 
     @property
     def service_code(self) -> str:
