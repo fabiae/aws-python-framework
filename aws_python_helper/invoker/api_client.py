@@ -1,4 +1,3 @@
-import json
 import logging
 import os
 from typing import Any, Dict, Optional
@@ -13,26 +12,58 @@ _AUTH_HEADER = "Authorization"
 _BEARER_PREFIX = "Bearer"
 
 
-def _resolve_service_url(service_name: str) -> str:
-    raw = os.getenv("MICROSERVICE_URLS", "")
-    if not raw:
-        raise ServiceNotConfiguredError(
-            "MICROSERVICE_URLS environment variable is not set"
-        )
-    try:
-        urls = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ServiceNotConfiguredError(
-            "MICROSERVICE_URLS is not valid JSON"
-        ) from exc
+CORE = "core"
 
-    url = urls.get(service_name)
+# Lo que este contenedor ya averiguó. Vive lo que vive la lambda, que es lo que
+# se quiere: un servicio redesplegado con otra URL se conoce en el próximo
+# arranque en frío, no dentro de horas.
+_RESOLVED: Dict[str, str] = {}
+
+
+def _core_url() -> str:
+    """Dónde está core. Es lo único que un servicio necesita saber de memoria.
+
+    Todo lo demás se lo pregunta a core, que lleva el registro de quién existe y
+    dónde responde. Una sola variable por servicio en vez de un mapa que había
+    que escribir en el secret de cada uno y mantener sincronizado a mano.
+    """
+    url = (os.getenv("CORE_API_URL") or "").rstrip("/")
     if not url:
-        available = ", ".join(urls.keys()) or "none"
         raise ServiceNotConfiguredError(
-            f"Service '{service_name}' not found in MICROSERVICE_URLS. Available: {available}"
+            "CORE_API_URL is not set: this service cannot reach core, and core is "
+            "where it learns about everything else."
         )
-    return url.rstrip("/")
+    return url
+
+
+async def resolve_service_url(service_name: str) -> str:
+    """La dirección de un servicio, según el registro de core."""
+    if service_name == CORE:
+        return _core_url()
+
+    if service_name in _RESOLVED:
+        return _RESOLVED[service_name]
+
+    token = _resolve_token()
+    headers = {_AUTH_HEADER: f"{_BEARER_PREFIX} {token}"} if token else {}
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        response = await client.get(f"{_core_url()}/services", headers=headers)
+        response.raise_for_status()
+        services = (response.json() or {}).get("services") or []
+
+    for service in services:
+        if service.get("api_url"):
+            _RESOLVED[service["code"]] = service["api_url"].rstrip("/")
+
+    url = _RESOLVED.get(service_name)
+    if not url:
+        known = ", ".join(sorted(_RESOLVED)) or "none"
+        raise ServiceNotConfiguredError(
+            f"Core does not know a service called '{service_name}'. Registered: {known}. "
+            "A service appears here when it deploys."
+        )
+    return url
 
 
 def _resolve_token() -> Optional[str]:
@@ -61,8 +92,8 @@ class ApiClient:
         client = ApiClient("dockets", headers={"constitution-state": "CT"})
 
     Environment variables:
-        MICROSERVICE_URLS     JSON map of service name → base URL
-                              e.g. {"dockets": "https://api.example.com/"}
+        CORE_API_URL          Where core answers. The only address a service
+                              holds; everything else it asks core for.
         INTER_SERVICE_TOKEN   Bearer token for service-to-service calls
         AUTH_BYPASS_TOKEN     Fallback if INTER_SERVICE_TOKEN is not set
     """
@@ -73,7 +104,8 @@ class ApiClient:
         headers: Optional[Dict[str, str]] = None,
         timeout: int = 30,
     ):
-        self._base_url = _resolve_service_url(service_name)
+        self._service_name = service_name
+        self._base_url: Optional[str] = None
         self._timeout = timeout
         self._headers = self._build_default_headers(headers or {})
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -86,7 +118,15 @@ class ApiClient:
         headers.update(extra)
         return headers
 
-    def _url(self, path: str) -> str:
+    async def _url(self, path: str) -> str:
+        """La URL completa, resolviendo el servicio la primera vez que hace falta.
+
+        Se resuelve al usarse y no al construirse porque preguntarle a core es
+        una llamada de red, y un constructor que hace una llamada de red no se
+        puede usar en ningún lado sin pensarlo.
+        """
+        if self._base_url is None:
+            self._base_url = await resolve_service_url(self._service_name)
         return f"{self._base_url}/{path.lstrip('/')}"
 
     async def get(self, path: str, params: Optional[Dict] = None) -> Any:
@@ -120,7 +160,7 @@ class ApiClient:
         params: Optional[Dict] = None,
         body: Optional[Dict] = None,
     ) -> Any:
-        url = self._url(path)
+        url = await self._url(path)
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 response = await client.request(
