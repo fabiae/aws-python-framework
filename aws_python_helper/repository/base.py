@@ -263,6 +263,40 @@ class Repository(ABC):
 
         return self._collection_cache[key]
 
+    async def page(
+        self,
+        query: Optional[Dict[str, Any]] = None,
+        *,
+        sort: Optional[List[tuple]] = None,
+        skip: int = 0,
+        limit: int = 50,
+        projection: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """A page of this collection and how many there are in total.
+
+        The count is a separate query and not a `$facet`: counting a filtered
+        million is expensive, and putting it in the same pipeline makes the page
+        wait for the count.
+
+        With no filter the total is **estimated**, which reads collection
+        metadata instead of the documents. Over a large collection that is the
+        difference between instant and a second full read, and the number is only
+        there to draw a paginator — nobody needs to know there are exactly
+        1,221,736 rather than about that.
+        """
+        query = query or {}
+        cursor = self.collection.find(query, projection)
+        if sort:
+            cursor = cursor.sort(sort)
+        items = await cursor.skip(skip).limit(limit).to_list(length=limit)
+
+        total = (
+            await self.collection.count_documents(query)
+            if query
+            else await self.collection.estimated_document_count()
+        )
+        return items, total
+
     async def ensure_indexes(self, database_name: Optional[str] = None):
         """
         Creates all indexes defined in the `indexes` property, blocking until done.

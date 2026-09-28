@@ -4,12 +4,24 @@ API Base Class - Base class for all REST APIs
 
 from abc import ABC, abstractmethod
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from ..database.mongo_manager import MongoManager
 from ..database.database_proxy import DatabaseProxy
 from ..database.external_mongo_manager import ExternalMongoManager
 from ..database.external_database_proxy import ExternalDatabaseProxy
 from ..context.session import get_session
+
+
+def _positive(value: Any) -> Optional[int]:
+    """Un entero positivo de la query, o None si no lo es.
+
+    Llega como texto desde la URL, y puede llegar cualquier cosa.
+    """
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
 
 
 class API(ABC):
@@ -186,6 +198,47 @@ class API(ABC):
         """
         return self._is_authenticated
     
+    # Lo que una página puede pedir. El máximo no es una opinión: es lo que una
+    # respuesta de lambda aguanta sin que el navegador se atragante.
+    DEFAULT_PAGE_SIZE = 50
+    MAX_PAGE_SIZE = 200
+
+    def page_bounds(self) -> Tuple[int, int]:
+        """Qué pedazo pidieron, acotado a algo que se pueda servir.
+
+        Sale de `page` y `size` de la query, que llegan como texto. Un valor que
+        no es un número, o que no tiene sentido, cae al default en vez de fallar:
+        un listado que devuelve 400 porque alguien escribió `page=abc` en la URL
+        es un listado roto por nada.
+        """
+        page = max(1, _positive(self.data.get('page')) or 1)
+        size = _positive(self.data.get('size')) or self.DEFAULT_PAGE_SIZE
+        size = min(self.MAX_PAGE_SIZE, max(1, size))
+        return (page - 1) * size, size
+
+    def paged(
+        self, items: List[Any], total: int, key: str = 'items'
+    ) -> Dict[str, Any]:
+        """The body of a paged listing.
+
+        The total travels with the page because without it a panel cannot draw a
+        paginator, and whoever is looking cannot tell ten of twelve from ten of a
+        million.
+
+        `key` names the list so an endpoint can keep answering `users` or
+        `regions` instead of a generic `items`; what a listing is called is part
+        of how it reads.
+        """
+        _, size = self.page_bounds()
+        page = max(1, _positive(self.data.get('page')) or 1)
+        return {
+            key: items,
+            'page': page,
+            'size': size,
+            'total': total,
+            'pages': (total + size - 1) // size if size else 0,
+        }
+
     async def granted_permissions(self):
         """Which permissions the caller holds, or None when this API does not know.
 
