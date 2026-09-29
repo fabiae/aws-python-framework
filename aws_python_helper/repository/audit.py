@@ -82,10 +82,13 @@ class InvalidStatusError(ValueError):
     """A status the repository does not declare."""
 
 
-def _check_status(value: Any, statuses: Optional[List[str]]) -> None:
+def _check_status(
+    value: Any, statuses: Optional[List[str]], field: str = STATUS
+) -> None:
     if statuses and value is not None and value not in statuses:
         raise InvalidStatusError(
-            f"'{value}' is not a valid status. Declared: {', '.join(statuses)}"
+            f"'{value}' is not a valid value for '{field}'. "
+            f"Declared: {', '.join(statuses)}"
         )
 
 
@@ -93,6 +96,7 @@ def stamp_new(
     document: Dict[str, Any],
     statuses: Optional[List[str]] = None,
     default_status: Optional[str] = None,
+    status_field: str = STATUS,
 ) -> Dict[str, Any]:
     """The framework fields on a document being created.
 
@@ -110,8 +114,8 @@ def stamp_new(
     document.setdefault(UPDATED_BY, who)
 
     if statuses:
-        document.setdefault(STATUS, default_status or statuses[0])
-        _check_status(document.get(STATUS), statuses)
+        document.setdefault(status_field, default_status or statuses[0])
+        _check_status(document.get(status_field), statuses, status_field)
     return document
 
 
@@ -146,6 +150,7 @@ def stamp_update(
     upsert: bool = False,
     statuses: Optional[List[str]] = None,
     default_status: Optional[str] = None,
+    status_field: str = STATUS,
 ) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
     """The two 'updated' fields on a modification, and the 'created' ones on an upsert.
 
@@ -165,14 +170,14 @@ def stamp_update(
 
     # Un reemplazo entero —sin operadores— es un documento, no una modificación.
     if update and not any(key.startswith('$') for key in update):
-        return stamp_new(dict(update), statuses, default_status)
+        return stamp_new(dict(update), statuses, default_status, status_field)
 
     update = dict(update)
     if statuses:
         for operator in ('$set', '$setOnInsert'):
             section = update.get(operator)
-            if isinstance(section, dict) and STATUS in section:
-                _check_status(section[STATUS], statuses)
+            if isinstance(section, dict) and status_field in section:
+                _check_status(section[status_field], statuses, status_field)
 
     _merge_into_set(update, touched, '$set')
     if upsert:
@@ -180,7 +185,7 @@ def stamp_update(
         # inicial sólo en ese caso.
         born = {CREATED_AT: now, CREATED_BY: who}
         if statuses:
-            born[STATUS] = default_status or statuses[0]
+            born[status_field] = default_status or statuses[0]
         born = {
             key: value
             for key, value in born.items()
@@ -201,23 +206,27 @@ class AuditedCollection:
     than asking for the stamp explicitly.
     """
 
-    __slots__ = ('_collection', '_statuses', '_default_status')
+    __slots__ = ('_collection', '_statuses', '_default_status', '_status_field')
 
     def __init__(
         self,
         collection: Any,
         statuses: Optional[List[str]] = None,
         default_status: Optional[str] = None,
+        status_field: str = STATUS,
     ):
         object.__setattr__(self, '_collection', collection)
         object.__setattr__(self, '_statuses', statuses)
         object.__setattr__(self, '_default_status', default_status)
+        object.__setattr__(self, '_status_field', status_field)
 
     def _new(self, document: Dict[str, Any]) -> Dict[str, Any]:
-        return stamp_new(document, self._statuses, self._default_status)
+        return stamp_new(document, self._statuses, self._default_status, self._status_field)
 
     def _update(self, update: Any, upsert: bool) -> Any:
-        return stamp_update(update, upsert, self._statuses, self._default_status)
+        return stamp_update(
+            update, upsert, self._statuses, self._default_status, self._status_field
+        )
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._collection, name)

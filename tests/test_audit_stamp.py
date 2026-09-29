@@ -15,7 +15,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from aws_python_helper.repository.audit import stamp_update  # noqa: E402
+from aws_python_helper.repository.audit import stamp_new, stamp_update  # noqa: E402
 
 STATUSES = ["active", "inactive"]
 
@@ -81,6 +81,33 @@ print("\na pipeline update takes stages, not operators")
 result = stamp_update([{"$set": {"name": "ct"}}], upsert=True, statuses=STATUSES)
 check("still a list", isinstance(result, list))
 check("stamp appended last", result[-1]["$set"].get("updated_at") is not None)
+
+print("\nthe lifecycle field can be called something else")
+result = stamp_new(
+    {"name": "x", "status": "FORFEITED"},
+    ["active", "inactive"],
+    "active",
+    status_field="lifecycle_status",
+)
+check("the collection's own status is untouched", result["status"] == "FORFEITED")
+check("the framework writes its own field", result["lifecycle_status"] == "active")
+
+result = stamp_update(
+    {"$set": {"name": "x"}},
+    upsert=True,
+    statuses=["active"],
+    default_status="active",
+    status_field="lifecycle_status",
+)
+check("and on an upsert it stamps that one", result["$setOnInsert"]["lifecycle_status"] == "active")
+check("with no path conflict", not conflicts(result))
+
+try:
+    stamp_new({"lifecycle_status": "made up"}, ["active"], status_field="lifecycle_status")
+    check("a value outside the vocabulary is refused", False)
+except ValueError as error:
+    check("a value outside the vocabulary is refused", "lifecycle_status" in str(error),
+          "and the message names the field")
 
 if failures:
     print(f"\n{len(failures)} failed: {failures}")

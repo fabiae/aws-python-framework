@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ..database.mongo_manager import MongoManager
 from ..database.external_mongo_manager import ExternalMongoManager
 from ..context.session import get_session
-from .audit import DEFAULT_STATUSES, AuditedCollection
+from .audit import DEFAULT_STATUSES, STATUS, AuditedCollection
 
 
 class Repository(ABC):
@@ -170,6 +170,26 @@ class Repository(ABC):
         return list(DEFAULT_STATUSES)
 
     @property
+    def status_field(self) -> str:
+        """Cómo se llama el campo que lleva el ciclo de vida del registro.
+
+        `status` por defecto. Se cambia cuando una colección ya usa ese nombre
+        para otra cosa y migrarla no vale la pena: los 1,2 millones de empresas
+        traen el estado del registro del estado en `status`, y 5,7 millones de
+        parcels podrían traer otro. Renombrar en la base es lo más limpio cuando
+        se puede; cuando no, se le dice al framework dónde escribir el suyo.
+
+            class ParcelRepository(Repository):
+                @property
+                def status_field(self):
+                    return "lifecycle_status"
+
+        Las dos cosas son independientes: `statuses` dice qué valores valen, esto
+        dice dónde se guardan.
+        """
+        return STATUS
+
+    @property
     def default_status(self) -> Optional[str]:
         """What a record gets when nobody says otherwise. First of `statuses`."""
         declared = self.statuses
@@ -256,7 +276,9 @@ class Repository(ABC):
             collection = db[self.collection_name]
             # La envoltura completa las escrituras; todo lo demás pasa de largo.
             self._collection_cache[key] = (
-                AuditedCollection(collection, self.statuses, self.default_status)
+                AuditedCollection(
+                    collection, self.statuses, self.default_status, self.status_field
+                )
                 if self.audit
                 else collection
             )
