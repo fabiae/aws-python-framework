@@ -7,6 +7,7 @@ from typing import Dict, Any, Optional
 import os
 import logging
 from datetime import datetime
+from . import jwt_keys
 from .exceptions import UnauthorizedError
 from ..database.mongo_manager import MongoManager
 
@@ -191,36 +192,16 @@ class JWTValidator(AuthValidator):
     touched. That is what lets any microservice authenticate a request without
     calling the issuer.
 
+    The key comes from core, which publishes it: see `jwt_keys`. A service that
+    pins JWT_PUBLIC_KEY uses that instead and never calls out.
+
     Environment:
-        JWT_PUBLIC_KEY: RSA public key in PEM, raw or base64-encoded.
+        CORE_API_URL: where core answers. How the key is found.
+        JWT_PUBLIC_KEY: pins the key instead of reading it from core.
         JWT_ISSUER: expected `iss`. Defaults to 'constitution-core'.
         JWT_AUDIENCE: expected `aud`. Only verified when set.
         AUTH_BYPASS_TOKEN: still honoured, same as TokenValidator.
     """
-
-    _public_key_cache: Optional[str] = None
-
-    @classmethod
-    def _public_key(cls) -> str:
-        """The configured public key, decoded once per container."""
-        if cls._public_key_cache:
-            return cls._public_key_cache
-
-        raw = os.getenv('JWT_PUBLIC_KEY')
-        if not raw:
-            raise ValueError(
-                "JWT_PUBLIC_KEY environment variable not set. "
-                "Required when AUTH_STRATEGY=jwt."
-            )
-
-        key = raw.strip()
-        if not key.startswith('-----BEGIN'):
-            # PEMs are multi-line, so they travel base64-encoded in env vars.
-            import base64
-            key = base64.b64decode(key).decode('utf-8')
-
-        cls._public_key_cache = key
-        return key
 
     async def validate_token(self, token: str) -> Dict[str, Any]:
         caller = _machine_caller(token)
@@ -234,11 +215,25 @@ class JWTValidator(AuthValidator):
                 "PyJWT is required for AUTH_STRATEGY=jwt. Install aws-python-helper[jwt]."
             ) from exc
 
+        # El kid del header dice con qué clave se firmó. Es dato sin verificar y
+        # sólo se usa para elegir la clave: la firma se comprueba igual, así que
+        # un kid mentido no abre nada, simplemente no encuentra clave.
+        try:
+            kid = jwt.get_unverified_header(token).get('kid')
+        except jwt.InvalidTokenError:
+            raise UnauthorizedError("Invalid token")
+
+        try:
+            key = await jwt_keys.resolve(kid)
+        except ValueError as exc:
+            logger.error("Cannot verify tokens: %s", exc)
+            raise
+
         audience = os.getenv('JWT_AUDIENCE')
         try:
             claims = jwt.decode(
                 token,
-                self._public_key(),
+                key,
                 algorithms=['RS256'],
                 issuer=os.getenv('JWT_ISSUER', 'constitution-core'),
                 audience=audience,
