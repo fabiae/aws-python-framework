@@ -13,6 +13,56 @@ from ..database.mongo_manager import MongoManager
 logger = logging.getLogger(__name__)
 
 
+def _machine_caller(token: str) -> Optional[Dict[str, Any]]:
+    """Quién es, cuando quien llama no es una persona.
+
+    Dos tokens distintos, porque son dos cosas distintas y confundirlas deja una
+    puerta abierta más ancha de lo que nadie quiso:
+
+    - `INTER_SERVICE_TOKEN` dice **"soy un microservicio de los nuestros"**. Es
+      lo que un servicio manda cuando le habla a otro. No es un usuario y no
+      tiene permisos de nadie: un endpoint que lo acepta lo dice explícitamente.
+    - `AUTH_BYPASS_TOKEN` es la **llave maestra**, la forma de entrar cuando una
+      configuración de permisos quedó mal. Abre todo, y por eso no debería ser la
+      que un servicio usa todos los días.
+
+    Devuelve None si el token no es ninguno de los dos, y entonces se valida como
+    lo que es: el token de una persona.
+    """
+    service_token = os.getenv('INTER_SERVICE_TOKEN')
+    if service_token and token == service_token:
+        logger.info("Inter-service token used")
+        return {
+            'user_id': 'service',
+            'user': {
+                '_id': 'service',
+                'email': 'service@system',
+                'name': 'Service',
+                'role': 'service',
+            },
+            'is_service': True,
+            'is_bypass': False,
+            'token_data': None,
+        }
+
+    bypass_token = os.getenv('AUTH_BYPASS_TOKEN')
+    if bypass_token and token == bypass_token:
+        logger.info("Bypass token used - skipping validation")
+        return {
+            'user_id': 'bypass',
+            'user': {
+                '_id': 'bypass',
+                'email': 'bypass@system',
+                'name': 'Bypass User',
+                'role': 'admin',
+            },
+            'is_bypass': True,
+            'token_data': None,
+        }
+
+    return None
+
+
 class AuthValidator(ABC):
     """
     Abstract base class for authentication validators
@@ -63,21 +113,11 @@ class TokenValidator(AuthValidator):
             UnauthorizedError: If token is invalid or expired
         """
         
-        # 1. Check bypass token first (for development/testing)
-        bypass_token = os.getenv('AUTH_BYPASS_TOKEN')
-        if bypass_token and token == bypass_token:
-            logger.info("Bypass token used - skipping DB validation")
-            return {
-                'user_id': 'bypass',
-                'user': {
-                    'email': 'bypass@system',
-                    'role': 'admin',
-                    'name': 'Bypass User',
-                    '_id': 'bypass'
-                },
-                'is_bypass': True,
-                'token_data': None
-            }
+        # 1. Quien llama puede no ser una persona: un servicio o la llave maestra.
+        caller = _machine_caller(token)
+        if caller:
+            return caller
+
         
         # 2. Get database name from environment
         db_name = os.getenv('AUTH_DB_NAME') or 'core'
@@ -183,20 +223,9 @@ class JWTValidator(AuthValidator):
         return key
 
     async def validate_token(self, token: str) -> Dict[str, Any]:
-        bypass_token = os.getenv('AUTH_BYPASS_TOKEN')
-        if bypass_token and token == bypass_token:
-            logger.info("Bypass token used - skipping JWT validation")
-            return {
-                'user_id': 'bypass',
-                'user': {
-                    'email': 'bypass@system',
-                    'role': 'admin',
-                    'name': 'Bypass User',
-                    '_id': 'bypass'
-                },
-                'is_bypass': True,
-                'token_data': None
-            }
+        caller = _machine_caller(token)
+        if caller:
+            return caller
 
         try:
             import jwt
