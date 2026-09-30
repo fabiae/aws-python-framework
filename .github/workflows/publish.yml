@@ -1,0 +1,51 @@
+name: publish
+
+# Publicar es pushear un tag. La versión sale de pyproject.toml y el tag tiene
+# que decir lo mismo: son dos lugares y uno se olvida.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  # Lo único que hace falta. PyPI reconoce a este workflow por su identidad de
+  # GitHub y le da un token que vive minutos, así que no hay ninguna credencial
+  # guardada — ni acá ni en la máquina de nadie.
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    name: pypi
+    runs-on: ubuntu-latest
+    # Si este environment tiene un reviewer, el tag no publica hasta que alguien
+    # apruebe. Una versión en PyPI no se puede volver a subir, ni borrándola.
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: el tag y la versión tienen que coincidir
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          if [ "$tag" != "$version" ]; then
+            echo "El tag dice $tag y pyproject.toml dice $version."
+            echo "Publicar así deja una versión que nadie encuentra por su tag."
+            exit 1
+          fi
+          echo "Publicando **$version**" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: construir
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      - name: revisar el paquete antes de subirlo
+        run: |
+          python -m pip install --upgrade twine
+          twine check dist/*
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
