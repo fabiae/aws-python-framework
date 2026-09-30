@@ -44,7 +44,7 @@ DEFAULT_STATUSES = [ACTIVE, INACTIVE]
 
 def _system_actor() -> Dict[str, str]:
     """The process doing the writing, when no person is behind it."""
-    service = os.getenv('SERVICE_CODE') or os.getenv('NAMESPACE') or 'constitution'
+    service = os.getenv('SERVICE_CODE') or os.getenv('NAMESPACE') or 'system'
     # Cada entrypoint deja su rastro: la lambda su nombre, el task el suyo.
     process = (
         os.getenv('PROCESS_NAME')

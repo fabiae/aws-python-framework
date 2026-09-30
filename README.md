@@ -84,7 +84,7 @@ your-project/
     │
     ├── consumer/                     # SQS Consumers (direct files)
     │   ├── user_created.py            # user-created -> UserCreatedConsumer
-    │   ├── title_indexed.py           # title-indexed -> TitleIndexedConsumer
+    │   ├── order_created.py           # title-indexed -> TitleIndexedConsumer
     │   └── order_processed.py         # order-processed -> OrderProcessedConsumer
     │
     ├── lambda/                        # Standalone Lambdas (folders)
@@ -129,22 +129,22 @@ The framework uses automatic class name detection based on your folder/file stru
 
 ### Create an Endpoint
 
-**1. Create your API class** in `src/api/constitutions/list.py`:
+**1. Create your API class** in `src/api/orders/list.py`:
 
 ```python
 from aws_python_helper.api.base import API
 
-class ConstitutionListAPI(API):
+class OrdersListAPI(API):
     async def process(self):
         # Direct access to MongoDB
-        constitutions = await self.db.constitution_db.constitutions.find().to_list(100)
-        self.set_body(constitutions)
+        orders = await self.db.app_db.orders.find().to_list(100)
+        self.set_body(orders)
 ```
 
 **2. The routing is automatic:**
-- `GET /constitutions` → `src/api/constitutions/list.py`
-- `GET /constitutions/123` → `src/api/constitutions/get.py`
-- `POST /constitutions` → `src/api/constitutions/post.py`
+- `GET /orders` → `src/api/orders/list.py`
+- `GET /orders/123` → `src/api/orders/get.py`
+- `POST /orders` → `src/api/orders/post.py`
 
 **3. Configure the generic handler** (`src/handlers/api_handler.py`):
 
@@ -155,7 +155,7 @@ handler = api_handler
 
 ### Create an SQS Consumer
 
-**1. Create your consumer** in `src/consumer/title_indexed.py`:
+**1. Create your consumer** in `src/consumer/order_created.py`:
 
 ```python
 from aws_python_helper.sqs.consumer_base import SQSConsumer
@@ -164,7 +164,7 @@ class TitleIndexedConsumer(SQSConsumer):
     async def process_record(self, record):
         body = self.extract_content_message(record)
         # Your logic here
-        await self.db.constitution_db.titles.insert_one(body)
+        await self.db.app_db.invoices.insert_one(body)
 ```
 
 **2. Configure the handler** in `src/handlers/sqs_handler.py`:
@@ -173,9 +173,9 @@ class TitleIndexedConsumer(SQSConsumer):
 from aws_python_helper.sqs.handler import sqs_handler
 
 # Create a handler for each consumer and export it
-title_indexed_handler = sqs_handler('title-indexed')
+order_created_handler = sqs_handler('title-indexed')
 
-__all__ = ['title_indexed_handler']
+__all__ = ['order_created_handler']
 ```
 
 ### Create a Standalone Lambda
@@ -330,7 +330,7 @@ lambda_client.invoke(
 
 ### Publish to SNS
 
-**1. Create your topic** in `src/topic/title_indexed.py`:
+**1. Create your topic** in `src/topic/order_created.py`:
 
 ```python
 from aws_python_helper.sns.publisher import SNSPublisher
@@ -342,10 +342,10 @@ class TitleIndexedTopic(SNSPublisher):
             topic_arn=os.getenv('TITLE_INDEXED_SNS_TOPIC_ARN')
         )
 
-    def build_message(self, constitution_id, title, event_type='title_indexed'):
+    def build_message(self, order_id, title, event_type='order_created'):
         return {
             'content': {
-                'constitution_id': constitution_id,
+                'order_id': order_id,
                 'title': title,
                 'event_type': event_type
             },
@@ -358,18 +358,18 @@ class TitleIndexedTopic(SNSPublisher):
 **2. Use the topic** from anywhere:
 
 ```python
-from src.topic.title_indexed import TitleIndexedTopic
+from src.topic.order_created import TitleIndexedTopic
 
 # In a consumer, API or task
 topic = TitleIndexedTopic()
 
 # Publish a single message
-await topic.publish(topic.build_message('123', 'My Constitution'))
+await topic.publish(topic.build_message('123', 'Order 123'))
 
 # Publish multiple messages in batch
 messages = [
-    topic.build_message('id1', 'Constitution A'),
-    topic.build_message('id2', 'Constitution B'),
+    topic.build_message('id1', 'Order A'),
+    topic.build_message('id2', 'Order B'),
 ]
 await topic.publish(messages)
 ```
@@ -398,7 +398,7 @@ class SearchTaxByTownTask(FargateTask):
         self.logger.info(f"Processing town: {town}")
 
         # Access to DB
-        docs = await self.db.smart_data.address.find({'town': town}).to_list()
+        docs = await self.db.analytics.address.find({'town': town}).to_list()
 
         # Your logic here
         for doc in docs:
@@ -468,8 +468,8 @@ class MyAPI(API):
         await self.db.analytics_db.logs.insert_one({'action': 'view'})
 
         # Multiple collections
-        titles = await self.db.constitution_db.titles.find().to_list(100)
-        articles = await self.db.constitution_db.articles.find().to_list(100)
+        titles = await self.db.app_db.invoices.find().to_list(100)
+        articles = await self.db.app_db.line_items.find().to_list(100)
 ```
 
 The pattern is always: `self.db.<database_name>.<collection_name>.<motor_operation>()`
@@ -480,7 +480,7 @@ Connect to additional MongoDB clusters using `EXTERNAL_MONGODB_CONNECTIONS`:
 
 ```bash
 EXTERNAL_MONGODB_CONNECTIONS='[
-    {"name": "ClusterDockets", "connection_string": "mongodb+srv://cluster.mongodb.net"},
+    {"name": "AnalyticsCluster", "connection_string": "mongodb+srv://cluster.mongodb.net"},
     {"name": "ClusterAnalytics", "connection_string": "mongodb+srv://analytics.mongodb.net"}
 ]'
 ```
@@ -493,7 +493,7 @@ Access external clusters via `self.external_db`:
 class AddressAPI(API):
     async def process(self):
         # Access external cluster: self.external_db.<ClusterName>.<database>.<collection>
-        addresses = await self.external_db.ClusterDockets.smart_data.addresses.find(
+        addresses = await self.external_db.AnalyticsCluster.analytics.addresses.find(
             {'town': self.data['town']}
         ).to_list(100)
 
@@ -624,7 +624,7 @@ class AddressRepository(Repository):
 
     @property
     def database_key(self):
-        return "smart_data"
+        return "analytics"
 
     @property
     def collection_name(self):
@@ -636,7 +636,7 @@ class AddressRepository(Repository):
 
     @property
     def cluster_name(self):
-        return "ClusterDockets"  # Must match a name in EXTERNAL_MONGODB_CONNECTIONS
+        return "AnalyticsCluster"  # Must match a name in EXTERNAL_MONGODB_CONNECTIONS
 
     async def find_by_query(self, query, limit=None):
         cursor = self.collection.find(query)
@@ -671,7 +671,7 @@ The framework propagates a `Session` object automatically across the entire asyn
 
 | Entry point | How the session is read |
 |-------------|-------------------------|
-| **API Gateway** | `constitution-state` header → `session.state` (when `AUTHORIZATION` includes `state`); auth middleware → `session.user` (when includes `user`). Returns `400` if required header is missing |
+| **API Gateway** | `STATE_HEADER` header → `session.state` (when `AUTHORIZATION` includes `state`); auth middleware → `session.user` (when includes `user`). Returns `400` if required header is missing |
 | **Standalone Lambda** | `session` dict in the event payload — **required by default** (must include `state`), raises `ValueError` if missing. A Lambda can opt out via `requires_state = False` (e.g. `ModelIndexSyncLambda`), making the session optional |
 | **SQS Consumer (single mode)** | Per-record: reads `session` from SNS `MessageAttributes` (Base64-encoded JSON) |
 | **SQS Consumer (batch mode)** | Groups records by `session.state`; calls `process_batch()` once per group with the correct session in context |
@@ -684,7 +684,7 @@ The framework propagates a `Session` object automatically across the entire asyn
 | **SNS Publisher** | Auto-injects the full session as a `session` `MessageAttribute` (Base64-encoded JSON) on every published message |
 | **FargateExecutor** | Auto-injects `SESSION` as a JSON env var when launching Fargate containers |
 
-This means that an API call with `constitution-state: connecticut` will automatically carry the full session (state + user) through SNS → SQS → Fargate without any code changes in your consumers or tasks.
+This means that an API call with `x-state: connecticut` will automatically carry the full session (state + user) through SNS → SQS → Fargate without any code changes in your consumers or tasks.
 
 ### Accessing the session in handlers
 
@@ -717,11 +717,11 @@ session.user                    # authenticated user dict, or None
 set_session(Session(state="new_jersey"))  # set manually (the framework does this automatically)
 ```
 
-### API example — `constitution-state` header
+### API example — the state header
 
 ```
-GET /constitutions HTTP/1.1
-constitution-state: connecticut
+GET /orders HTTP/1.1
+x-state: connecticut
 Authorization: Bearer <token>
 ```
 
@@ -866,10 +866,10 @@ class AdminOnlyAPI(API):
 ## 🎯 Complete Example
 
 ```python
-# src/api/constitutions/list.py
+# src/api/orders/list.py
 from aws_python_helper.api.base import API
 
-class ConstitutionListAPI(API):
+class OrdersListAPI(API):
     async def validate(self):
         if 'limit' in self.data:
             limit = int(self.data['limit'])
@@ -884,12 +884,12 @@ class ConstitutionListAPI(API):
 
         # Query MongoDB
         limit = int(self.data.get('limit', 100))
-        results = await self.db.constitution_db.constitutions.find(
+        results = await self.db.app_db.orders.find(
             filters
         ).limit(limit).to_list(limit)
 
         # Count total
-        total = await self.db.constitution_db.constitutions.count_documents(filters)
+        total = await self.db.app_db.orders.count_documents(filters)
 
         # Register in analytics
         await self.db.analytics_db.searches.insert_one({
@@ -1120,23 +1120,23 @@ HTTP client for service-to-service calls. Resolves the target URL and auth token
 ```python
 from aws_python_helper import ApiClient
 
-client = ApiClient("dockets")                               # service name only
+client = ApiClient("billing")                               # service name only
 result = await client.post("/search", body={"keys": [...]})
-result = await client.get("/dockets/123")
-result = await client.list("/dockets", params={"state": "CT"})
-result = await client.put("/dockets/123", body={"status": "active"})
-result = await client.patch("/dockets/123", body={"reviewed": True})
-result = await client.delete("/dockets/123")
+result = await client.get("/invoices/123")
+result = await client.list("/invoices", params={"state": "CT"})
+result = await client.put("/invoices/123", body={"status": "active"})
+result = await client.patch("/invoices/123", body={"reviewed": True})
+result = await client.delete("/invoices/123")
 
 # Extra headers merged with the defaults (token is always injected automatically)
-client = ApiClient("dockets", headers={"constitution-state": "CT"})
+client = ApiClient("billing", headers={"x-tenant": "acme"})
 ```
 
 **How URL and token are resolved:**
 
 | Env var | Purpose |
 |---------|---------|
-| `MICROSERVICE_URLS` | JSON map: `{"dockets": "https://api.example.com/", "title-search": "https://..."}` |
+| `MICROSERVICE_URLS` | JSON map: `{"billing": "https://api.example.com/", "catalog": "https://..."}` |
 | `INTER_SERVICE_TOKEN` | Bearer token injected as `Authorization: Bearer <token>` |
 | `AUTH_BYPASS_TOKEN` | Fallback if `INTER_SERVICE_TOKEN` is not set |
 
@@ -1154,7 +1154,7 @@ client = ApiClient("dockets", headers={"constitution-state": "CT"})
 # In AWS Secrets Manager secret (JSON):
 # {
 #   "inter_service_token": "my-secret-token",
-#   "microservice_urls": "{\"dockets\": \"https://api-dockets.execute-api.us-east-2.amazonaws.com/\"}",
+#   "microservice_urls": "{\"billing\": \"https://api.example.com/\"}",
 #   ...
 # }
 
@@ -1574,7 +1574,7 @@ environment_variables = {
 | `MICROSERVICE_URLS` | Optional | JSON map of service name → base URL used by `ApiClient` |
 | `ECS_CLUSTER` | Fargate only | ECS cluster name for `FargateExecutor` |
 | `ECS_SUBNETS` | Fargate only | Comma-separated subnet IDs for Fargate tasks |
-| `CONSTITUTION_STATE` | Fargate only (auto) | State injected automatically by `FargateExecutor` — do not set manually |
+| `SESSION` | Fargate only (auto) | The whole session, injected by `FargateExecutor` — do not set manually |
 | `AWS_REGION` | Fargate/SNS/SQS | AWS region |
 | `AWS_ACCOUNT_ID` | SQS `get_queue_url` | AWS account ID |
 | `SERVICE_NAME` | SQS `get_queue_url` | Service name prefix for queue name |
@@ -1587,9 +1587,9 @@ environment_variables = {
 
 By default, consumers process messages one by one (`"single"` mode). Use `"batch"` mode when you need to group or bulk-process messages.
 
-**Constitution-state handling in SQS:**
+**State handling in SQS:**
 - **Single mode**: the framework extracts the session from each record automatically (from SNS `MessageAttributes`, Base64-decoded) and sets it in context before calling `process_record()`. You do not need to extract it yourself.
-- **Batch mode**: the framework groups the incoming records by `constitution-state` and calls `process_batch()` once per group, with the correct state in context for each group. This ensures that state-scoped repositories resolve to the right database even when a batch contains records from different states.
+- **Batch mode**: the framework groups the incoming records by state and calls `process_batch()` once per group, with the correct state in context for each group. This ensures that state-scoped repositories resolve to the right database even when a batch contains records from different states.
 
 ```python
 from aws_python_helper.sqs.consumer_base import SQSConsumer
@@ -1644,7 +1644,7 @@ The `SNSPublisher` automatically injects the current session as a Base64-encoded
 topic = TitleIndexedTopic()
 
 # Publish multiple messages in a single call
-# constitution-state is auto-injected as a MessageAttribute on each message
+# The state travels as a MessageAttribute on each message, injected automatically
 await topic.publish([
     {'content': {'id': 'id1', 'title': 'Title 1'}, 'attributes': {'type': 'created'}},
     {'content': {'id': 'id2', 'title': 'Title 2'}, 'attributes': {'type': 'updated'}},

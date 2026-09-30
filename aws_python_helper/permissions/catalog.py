@@ -40,7 +40,7 @@ def service_code() -> str:
 
     One function on purpose. Publishing the catalog and checking a permission are
     two different places, and if each resolves the name its own way one stores
-    `core:GET /users` while the other demands `constitution-core:GET /users`.
+    `core:GET /users` while the other demands `my-core-service:GET /users`.
     Nothing reports that: every role with explicit permissions just gets 403 on
     everything, and a role holding `*` keeps working, so it looks like a problem
     with the role.

@@ -35,7 +35,7 @@ class ExternalMongoManager:
         The environment variable EXTERNAL_MONGODB_CONNECTIONS should be a JSON array:
         [
             {
-                'name': 'ClusterDockets',
+                'name': 'AnalyticsCluster',
                 'connection_string': 'mongodb+srv://...'
             }
         ]

@@ -29,7 +29,7 @@ class Repository(ABC):
 
     Optional properties to override:
         database_key (str | None): Explicit database name to use.
-            - If set (e.g., 'core', 'smart_data'): always uses that database.
+            - If set (e.g., 'core', 'analytics'): always uses that database.
             - If None (default): uses session.state automatically.
               This makes the repository "state-scoped" — it connects to the database
               matching the current request state (e.g., 'connecticut', 'new_jersey').
@@ -79,7 +79,7 @@ class Repository(ABC):
 
             @property
             def database_key(self):
-                return "smart_data"
+                return "analytics"
 
             @property
             def collection_name(self):
@@ -91,7 +91,7 @@ class Repository(ABC):
 
             @property
             def cluster_name(self):
-                return "ClusterDockets"
+                return "AnalyticsCluster"
 
         # Instantiate without passing any db connection
         repo = TownsRepository()
@@ -113,7 +113,7 @@ class Repository(ABC):
         """
         Explicit database name to use.
 
-        - If set (e.g., 'core', 'smart_data'): always connects to that database.
+        - If set (e.g., 'core', 'analytics'): always connects to that database.
         - If None (default): uses the current session state,
           making this repository state-scoped (different database per request state).
         """

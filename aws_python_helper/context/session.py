@@ -5,7 +5,7 @@ Uses Python's contextvars to propagate the current session across async call cha
 Set automatically by the framework at every entry point (API, Lambda, SQS Consumer, Fargate Task).
 
 The Session object holds:
-    - state: Constitution state for multi-state database routing
+    - state: The state this request belongs to, for multi-state database routing
     - user: Authenticated user data (from auth middleware)
     - Extensible for future properties
 """
@@ -33,7 +33,7 @@ class Session:
 
     @property
     def state(self) -> Optional[str]:
-        """Constitution state for database routing"""
+        """The state this request belongs to, for database routing"""
         return self._state
 
     @state.setter

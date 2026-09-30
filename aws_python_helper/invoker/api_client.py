@@ -84,12 +84,12 @@ class ApiClient:
     falling back to AUTH_BYPASS_TOKEN).
 
     Usage:
-        client = ApiClient("dockets")
+        client = ApiClient("billing")
         result = await client.post("/search", body={"keys": [...]})
-        result = await client.get("/dockets/123")
+        result = await client.get("/invoices/123")
 
-        # Extra headers (e.g. constitution-state) merged with the default ones
-        client = ApiClient("dockets", headers={"constitution-state": "CT"})
+        # Extra headers merged with the default ones
+        client = ApiClient("billing", headers={"x-tenant": "acme"})
 
     Environment variables:
         CORE_API_URL          Where core answers. The only address a service

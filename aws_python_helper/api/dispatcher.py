@@ -18,6 +18,18 @@ from ..context.state_validator import StateValidator, InvalidStateError
 logger = logging.getLogger(__name__)
 
 
+# Cómo se llama el header que dice qué estado se está mirando. Es un default y
+# no un literal repartido: el nombre es parte del protocolo entre los servicios
+# y el panel, así que cambiarlo es un cambio coordinado — pero tenerlo en un
+# solo lugar hace que ese día sea una variable de entorno y no una búsqueda.
+STATE_HEADER_DEFAULT = 'constitution-state'
+
+
+def state_header() -> str:
+    return os.getenv('STATE_HEADER', STATE_HEADER_DEFAULT)
+
+
+
 class Dispatcher:
     """
     Orchestrates the execution of the API
@@ -101,13 +113,13 @@ class Dispatcher:
 
             # 2b. Validate state header (if mode requires state)
             if requires_state:
-                state = self.headers.get('constitution-state')
+                state = self.headers.get(state_header())
                 if not state:
                     return {
                         'code': 400,
                         'body': {
                             'error': 'Bad Request',
-                            'message': "Header 'constitution-state' is required"
+                            'message': f"Header '{state_header()}' is required"
                         },
                         'headers': {}
                     }

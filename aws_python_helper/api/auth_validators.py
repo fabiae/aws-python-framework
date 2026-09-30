@@ -7,6 +7,12 @@ from typing import Dict, Any, Optional
 import os
 import logging
 from datetime import datetime
+# Quién firma los tokens que este servicio verifica. Es un default histórico y
+# no un nombre que el framework imponga: el `iss` de un token ya emitido no se
+# puede cambiar sin invalidarlo, así que se configura con JWT_ISSUER y esto
+# queda como el valor que venía de antes.
+ISSUER_DEFAULT = 'constitution-core'
+
 from . import jwt_keys
 from .exceptions import UnauthorizedError
 from ..database.mongo_manager import MongoManager
@@ -186,7 +192,7 @@ class TokenValidator(AuthValidator):
 
 class JWTValidator(AuthValidator):
     """
-    Validates RS256 JWTs issued by constitution-core.
+    Validates RS256 JWTs issued by the identity service.
 
     Stateless: the signature and the claims are enough, so no database is
     touched. That is what lets any microservice authenticate a request without
@@ -198,7 +204,7 @@ class JWTValidator(AuthValidator):
     Environment:
         CORE_API_URL: where core answers. How the key is found.
         JWT_PUBLIC_KEY: pins the key instead of reading it from core.
-        JWT_ISSUER: expected `iss`. Defaults to 'constitution-core'.
+        JWT_ISSUER: expected `iss`. Must match what the issuer signs.
         JWT_AUDIENCE: expected `aud`. Only verified when set.
         AUTH_BYPASS_TOKEN: still honoured, same as TokenValidator.
     """
@@ -235,7 +241,7 @@ class JWTValidator(AuthValidator):
                 token,
                 key,
                 algorithms=['RS256'],
-                issuer=os.getenv('JWT_ISSUER', 'constitution-core'),
+                issuer=os.getenv('JWT_ISSUER', ISSUER_DEFAULT),
                 audience=audience,
                 options={'verify_aud': bool(audience)},
             )

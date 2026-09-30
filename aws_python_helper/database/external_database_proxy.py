@@ -12,8 +12,8 @@ class ExternalDatabaseProxy:
     Proxy to dynamically access multiple external MongoDB clusters and their databases
     
     This proxy allows accessing external clusters dynamically:
-    - external_db.ClusterDockets.smart_data.addresses
-    - external_db.ClusterDockets.core.users
+    - external_db.AnalyticsCluster.analytics.addresses
+    - external_db.AnalyticsCluster.core.users
     
     Each cluster name returns a DatabaseProxy for that cluster.
     """
@@ -26,7 +26,7 @@ class ExternalDatabaseProxy:
         """
         Dynamic access to external clusters
         
-        It is called when you access self.external_db.ClusterDockets
+        It is called when you access self.external_db.AnalyticsCluster
         
         Args:
             cluster_name: Name of the external cluster
@@ -36,7 +36,7 @@ class ExternalDatabaseProxy:
         
         Example:
             # Access database in external cluster
-            result = await self.external_db.ClusterDockets.smart_data.addresses.find_one({...})
+            result = await self.external_db.AnalyticsCluster.analytics.addresses.find_one({...})
         """
         # Avoid recursion with internal attributes
         if cluster_name.startswith('_'):

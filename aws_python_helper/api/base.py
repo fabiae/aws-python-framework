@@ -128,8 +128,8 @@ class API(ABC):
         
         Usage:
             if self.external_db:
-                result = await self.external_db.ClusterDockets.smart_data.addresses.find_one({...})
-                await self.external_db.ClusterDockets.core.users.insert_one({...})
+                result = await self.external_db.AnalyticsCluster.analytics.addresses.find_one({...})
+                await self.external_db.AnalyticsCluster.core.users.insert_one({...})
         
         Returns:
             ExternalDatabaseProxy instance for accessing external clusters, or None if not configured
@@ -158,7 +158,7 @@ class API(ABC):
         and authentication middleware.
 
         Usage:
-            state = self.session.state          # constitution-state
+            state = self.session.state          # the state header
             user = self.session.user            # authenticated user dict
         """
         return get_session()

@@ -9,15 +9,15 @@ Usage — subclass and declare which collections are exposed:
 
     from aws_python_helper import ModelQueryLambda
 
-    class DocketsModelQueryLambda(ModelQueryLambda):
+    class CatalogModelQueryLambda(ModelQueryLambda):
         @property
         def allowed_collections(self) -> list:
-            return ["dockets", "tax_sales"]
+            return ["products", "prices"]
 
 Caller payload:
     {
         "session": {"state": "connecticut"},
-        "collection": "dockets",
+        "collection": "products",
         "filter":   {"case_type_code": "M10"},   # simple find — option A
         "pipeline": [...],                        # aggregate — option B (takes precedence)
         "fields":   {"docket_id": 1, "_id": 0},  # projection (only with filter)
@@ -164,7 +164,7 @@ class ModelQueryLambda(Lambda):
 
             @property
             def allowed_collections(self):
-                return ["dockets", "tax_sales"]
+                return ["products", "prices"]
 
         A dict lets the owner keep fields in, whatever the caller projects. This
         is not `fields`: that one is the caller saying what it wants, this one is
@@ -172,7 +172,7 @@ class ModelQueryLambda(Lambda):
 
             @property
             def allowed_collections(self):
-                return {"dockets": {}, "users": {"exclude": ["password"]}}
+                return {"products": {}, "users": {"exclude": ["password"]}}
         """
         return []
 
