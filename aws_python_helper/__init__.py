@@ -5,6 +5,7 @@ AWS Python Framework
 __version__ = "1.0.2"
 
 # All classes
+from . import settings
 from .api.base import API
 from .sqs.consumer_base import SQSConsumer
 from .database.mongo_manager import MongoManager
@@ -60,6 +61,7 @@ from .invoker import (
 from .monitoring import process_run, resolve_code, RunReporter, ProcessRunPublisher
 
 __all__ = [
+    "settings",
     'API',
     'process_run',
     'resolve_code',
