@@ -31,7 +31,11 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-PATH = "/services/settings"
+# Un solo segmento, y no `/services/settings`, porque para GET el fetcher
+# decide por posición: con dos segmentos el segundo es siempre un id, así que
+# buscaba `api/services/get.py` y devolvía 404. Un sub-recurso GET no existe en
+# esta convención.
+PATH = "/service-settings"
 TIMEOUT_SECONDS = 5
 # Si core no contestó, no se vuelve a preguntar en cada request.
 RETRY_FLOOR_SECONDS = 60
