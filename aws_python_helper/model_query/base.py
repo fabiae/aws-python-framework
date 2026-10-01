@@ -92,6 +92,11 @@ class _ModelQuerySchema(BaseModel):
     # y `extra="ignore"` la descartaba en silencio: la consulta terminaba en la
     # base del estado de la sesión y devolvía vacío sin error.
     database: Optional[str] = None
+    # Quién pregunta. Lo usa el servicio que expone esta lambda para recortar lo
+    # que devuelve a lo que le corresponde a ese servicio. Declarado por la
+    # misma razón que `database`: sin esto `extra="ignore"` lo descarta y el
+    # recorte se hace contra un servicio vacío, que es "nada".
+    service: Optional[str] = None
     filter: Optional[dict] = None
     pipeline: Optional[list] = None
     fields: Optional[dict] = None
