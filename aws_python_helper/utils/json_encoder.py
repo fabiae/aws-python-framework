@@ -3,7 +3,7 @@ MongoDB JSON Encoder - Custom JSON encoder to handle MongoDB types
 """
 
 import json
-from datetime import datetime, date
+from datetime import datetime, date, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -68,6 +68,15 @@ class MongoJSONEncoder(json.JSONEncoder):
         
         # Python datetime
         if isinstance(obj, datetime):
+            # Sin zona se asume UTC, que es lo que Mongo guarda y lo que el
+            # driver devuelve —naive— salvo que se lo configure para otra cosa.
+            #
+            # Sin esto la cadena sale sin marca y quien la lee la toma como hora
+            # local: en un navegador en UTC-5, un servicio que se anunció hace
+            # un minuto aparecía anunciándose "dentro de 5 horas". No falla
+            # nada, simplemente dice otra cosa.
+            if obj.tzinfo is None:
+                obj = obj.replace(tzinfo=timezone.utc)
             return obj.isoformat()
         
         # Python date
