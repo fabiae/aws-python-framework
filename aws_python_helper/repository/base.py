@@ -149,25 +149,65 @@ class Repository(ABC):
     @property
     def statuses(self) -> Optional[List[str]]:
         """
-        The values this record's `status` can take.
+        Los valores que puede tomar el `status` de este registro.
 
-        Every entity carries one, and the same two by default, so a listing can
-        show the state of anything without knowing what it is looking at. A
-        repository with its own lifecycle declares it:
+        Tres formas, según lo que la colección necesite:
 
-            class UserRepository(Repository):
+        **No declarar nada.** Se queda con los dos de siempre, `active` e
+        `inactive`, que es lo que hace que un listado pueda mostrar el estado de
+        cualquier cosa sin saber qué está mirando.
+
+        **Declarar `statuses`.** Reemplaza a los default: el vocabulario es ese y
+        no hay otro. Para una colección cuyo ciclo es completo y ajeno, donde
+        "activo" no significaría nada.
+
+            class SearchedKeyRepository(Repository):
                 @property
                 def statuses(self):
-                    return ["active", "pending", "inactive"]
+                    return ["queued", "in_progress", "complete", "failed"]
 
-        A write with a value outside this set is refused, not stored: an
-        unexpected status reaches a panel as an unknown label and a query as a
-        silent mismatch.
+        **Declarar `extra_statuses`.** Se suman a los default, que siguen
+        valiendo. Para una colección que tiene estados propios *además* del
+        ciclo de vida del registro.
 
-        None for collections where a lifecycle makes no sense — sessions, tokens,
-        counters.
+            class TaxSaleRepository(Repository):
+                @property
+                def extra_statuses(self):
+                    return ["new"]      # efectivo: new, active, inactive
+
+        Una escritura con un valor fuera del conjunto efectivo se rechaza, no se
+        guarda: un status que nadie esperaba llega a un panel como una etiqueta
+        desconocida y a una consulta como un silencio.
+
+        `None` para colecciones donde un ciclo de vida no significa nada
+        —sesiones, tokens, contadores—.
         """
         return list(DEFAULT_STATUSES)
+
+    @property
+    def extra_statuses(self) -> Optional[List[str]]:
+        """Valores propios que se agregan a los declarados, sin quitarlos.
+
+        La diferencia con `statuses` es qué pasa con `active` e `inactive`: acá
+        siguen valiendo. Ver la nota en `statuses`.
+        """
+        return None
+
+    @property
+    def effective_statuses(self) -> Optional[List[str]]:
+        """Lo que de verdad se acepta, ya resueltas las dos declaraciones.
+
+        Los extra van primero y sin repetir, porque el primero del conjunto es
+        el que recibe un registro nuevo cuando nadie dice otra cosa.
+        """
+        declared = self.statuses
+        extra = self.extra_statuses
+
+        if declared is None:
+            return list(dict.fromkeys(extra)) if extra else None
+        if not extra:
+            return list(declared)
+        return list(dict.fromkeys(list(extra) + list(declared)))
 
     @property
     def status_field(self) -> str:
@@ -191,9 +231,14 @@ class Repository(ABC):
 
     @property
     def default_status(self) -> Optional[str]:
-        """What a record gets when nobody says otherwise. First of `statuses`."""
-        declared = self.statuses
-        return declared[0] if declared else None
+        """Con qué nace un registro cuando nadie dice otra cosa.
+
+        El primero del conjunto efectivo, que con `extra_statuses` es el primero
+        de los propios: una venta nace `new`, no `active`, aunque `active`
+        también valga.
+        """
+        effective = self.effective_statuses
+        return effective[0] if effective else None
 
     @property
     def audit(self) -> bool:
@@ -277,7 +322,7 @@ class Repository(ABC):
             # La envoltura completa las escrituras; todo lo demás pasa de largo.
             self._collection_cache[key] = (
                 AuditedCollection(
-                    collection, self.statuses, self.default_status, self.status_field
+                    collection, self.effective_statuses, self.default_status, self.status_field
                 )
                 if self.audit
                 else collection
